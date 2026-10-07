@@ -25,7 +25,7 @@ def test_doctor_runs_without_a_target(monkeypatch, tmp_path, capsys):
         ["synchunt", "--doctor", "--config", str(tmp_path / "cfg.yaml")],
     )
     # provide a minimal config so ConfigManager can load something
-    (tmp_path / "cfg.yaml").write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n")
+    (tmp_path / "cfg.yaml").write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n", encoding="utf-8")
     code = cli.main()
     output = capsys.readouterr().out
     assert "Configuration check" in output
@@ -34,7 +34,7 @@ def test_doctor_runs_without_a_target(monkeypatch, tmp_path, capsys):
 
 def test_list_phases_documents_every_phase(monkeypatch, tmp_path, capsys):
     config = tmp_path / "cfg.yaml"
-    config.write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n")
+    config.write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n", encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["synchunt", "--list-phases", "--config", str(config)])
     code = cli.main()
     output = capsys.readouterr().out
@@ -46,7 +46,7 @@ def test_list_phases_documents_every_phase(monkeypatch, tmp_path, capsys):
 
 def test_unknown_phase_is_rejected(monkeypatch, tmp_path, capsys):
     config = tmp_path / "cfg.yaml"
-    config.write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n")
+    config.write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n", encoding="utf-8")
     monkeypatch.setattr(
         sys, "argv",
         ["synchunt", "-d", "example.com", "--phase", "not_a_phase",
@@ -70,7 +70,7 @@ def test_profile_flag_is_accepted(monkeypatch, tmp_path):
         "profiles:\n"
         "  quick:\n"
         "    phases: [subdomain, report]\n"
-    )
+    , encoding="utf-8")
     monkeypatch.setattr(
         sys, "argv",
         ["synchunt", "-d", "example.com", "--profile", "quick",
@@ -81,7 +81,7 @@ def test_profile_flag_is_accepted(monkeypatch, tmp_path):
 
 def test_invalid_targets_are_rejected(monkeypatch, tmp_path, capsys):
     config = tmp_path / "cfg.yaml"
-    config.write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n")
+    config.write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n", encoding="utf-8")
     monkeypatch.setattr(
         sys, "argv",
         ["synchunt", "-d", "not a domain", "--config", str(config)],
@@ -133,7 +133,7 @@ def test_cli_overrides_reach_the_config(monkeypatch, tmp_path, capsys):
          str(tmp_path / "cfg.yaml"), "--threads", "7", "--timeout", "11",
          "--rate-limit", "3.5"],
     )
-    (tmp_path / "cfg.yaml").write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n")
+    (tmp_path / "cfg.yaml").write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n", encoding="utf-8")
     assert cli.main() == 0
     assert captured == {"threads": 7, "timeout": 11, "rate": 3.5}
 
@@ -147,7 +147,7 @@ def test_json_report_is_written_even_when_the_run_fails(monkeypatch, tmp_path, c
         ["synchunt", "-d", "not a domain", "--json-report", str(summary)],
     )
     assert cli.main() == 3
-    payload = jsonlib.loads(summary.read_text())
+    payload = jsonlib.loads(summary.read_text(encoding="utf-8"))
     assert payload["exit_code"] == 3
     assert payload["targets"] == []
 
@@ -188,7 +188,7 @@ def test_target_parsing_handles_urls_ips_and_ports(tmp_path, config_path):
         "10.0.0.0/24\n"
         "127.0.0.1:8080\n"
         "not valid\n"
-    )
+    , encoding="utf-8")
     args = cli.parse_arguments(["-l", str(targets_file), "--config", config_path])
     app = cli.SyncHunt(args)
     targets = app._parse_targets()
@@ -209,7 +209,7 @@ def test_dry_run_writes_json_report(monkeypatch, tmp_path, config_path):
          "--output-dir", str(tmp_path / "out"), "--json-report", str(summary)],
     )
     assert cli.main() == 0
-    payload = jsonlib.loads(summary.read_text())
+    payload = jsonlib.loads(summary.read_text(encoding="utf-8"))
     assert payload["targets"][0]["status"] == "dry-run"
     assert payload["targets"][0]["phases"]
     assert payload["exit_code"] == 0
@@ -255,7 +255,7 @@ def test_end_to_end_run_against_local_server(monkeypatch, tmp_path, local_server
         "reporting:\n"
         "  html_report: true\n"
         "  markdown_report: true\n"
-    )
+    , encoding="utf-8")
     json_report = tmp_path / "summary.json"
     monkeypatch.setattr(
         sys, "argv",
@@ -269,7 +269,7 @@ def test_end_to_end_run_against_local_server(monkeypatch, tmp_path, local_server
         path for path in output.rglob("report.html")
     ]
     assert run_dirs, "HTML report should exist"
-    report = run_dirs[0].read_text()
+    report = run_dirs[0].read_text(encoding="utf-8")
     assert "SyncHunt Report" in report
     assert "GraphQL introspection" in report or "specification exposed" in report
 
@@ -280,7 +280,7 @@ def test_end_to_end_run_against_local_server(monkeypatch, tmp_path, local_server
 
     import json as jsonlib
 
-    summary = jsonlib.loads(json_report.read_text())
+    summary = jsonlib.loads(json_report.read_text(encoding="utf-8"))
     assert summary["tool"] == "SyncHunt"
     assert summary["exit_code"] == 0
     # targets are normalised (scheme stripped) before scanning
@@ -298,7 +298,7 @@ def test_resume_skips_completed_phases(monkeypatch, tmp_path, local_server):
         "  rate_limit: 5000\n  threads: 8\n  timeout: 5\n  retry: 0\n  verbose: false\n"
         "asset_enrichment:\n  enabled: true\n  max_hosts: 2\n"
         "  probe_admin_paths: false\n  admin_paths: []\n"
-    )
+    , encoding="utf-8")
     argv = ["synchunt", "-d", local_server, "--output-dir", str(output),
             "--phase", "enrichment,report", "--config", str(config), "--quiet"]
 
@@ -309,7 +309,7 @@ def test_resume_skips_completed_phases(monkeypatch, tmp_path, local_server):
     assert state_files, "state file should be written for resumes"
     import json
 
-    state = json.loads(state_files[0].read_text())
+    state = json.loads(state_files[0].read_text(encoding="utf-8"))
     assert "enrichment" in state["completed_phases"]
 
     monkeypatch.setattr(sys, "argv", argv + ["--resume"])

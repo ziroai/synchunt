@@ -77,9 +77,9 @@ def test_filter_records_drops_and_deduplicates():
 
 def test_from_config_reads_files_and_bang_exclusions(tmp_path):
     scope_file = tmp_path / "scope.txt"
-    scope_file.write_text("example.com\n!admin.example.com\n10.10.0.0/16\n")
+    scope_file.write_text("example.com\n!admin.example.com\n10.10.0.0/16\n", encoding="utf-8")
     config_file = tmp_path / "config.yaml"
-    config_file.write_text("scope:\n  strict: false\n")
+    config_file.write_text("scope:\n  strict: false\n", encoding="utf-8")
 
     from core.config_manager import ConfigManager
 

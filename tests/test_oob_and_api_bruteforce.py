@@ -298,7 +298,7 @@ def test_wordlist_file_supplements_the_builtin_list(ctx, tmp_path):
     from modules.api_introspection import APIIntrospector
 
     extra = tmp_path / "api.txt"
-    extra.write_text("# comment\ncustom/v9\n\napi/v1\n")
+    extra.write_text("# comment\ncustom/v9\n\napi/v1\n", encoding="utf-8")
     ctx.config.set("api_introspection.bruteforce.wordlist", str(extra))
 
     phase = APIIntrospector(ctx)

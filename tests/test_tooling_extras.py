@@ -87,7 +87,7 @@ def test_cli_dedupe_unfurl_gf(tmp_path, capsys):
         "https://a.example.com/item?id=7\n"
         "https://a.example.com/static/logo.png\n"
         "https://a.example.com/next?next=https://evil.example\n"
-    )
+    , encoding="utf-8")
 
     assert tools_cli.main(["dedupe", str(urls)]) == 0
     out = capsys.readouterr().out.splitlines()
@@ -106,9 +106,9 @@ def test_cli_meg_urls_and_postman(tmp_path, capsys):
     import tools_cli
 
     hosts = tmp_path / "hosts.txt"
-    hosts.write_text("a.example.com\nb.example.com\n")
+    hosts.write_text("a.example.com\nb.example.com\n", encoding="utf-8")
     paths = tmp_path / "paths.txt"
-    paths.write_text("/admin\n/.env\n")
+    paths.write_text("/admin\n/.env\n", encoding="utf-8")
 
     assert tools_cli.main(["meg-urls", "--hosts", str(hosts), "--paths", str(paths)]) == 0
     urls = capsys.readouterr().out.splitlines()
@@ -123,7 +123,7 @@ def test_cli_meg_urls_and_postman(tmp_path, capsys):
             "item": [{"request": {"url": {"protocol": "https", "host": ["api", "example", "com"],
                                          "path": ["v2", "orders"]}}}],
         }],
-    }))
+    }), encoding="utf-8")
     assert tools_cli.main(["postman", str(collection)]) == 0
     out = capsys.readouterr().out
     assert "https://api.example.com/v1/users/1" in out
@@ -134,7 +134,7 @@ def test_cli_hash_id(tmp_path, capsys):
     import tools_cli
 
     hashes = tmp_path / "h.txt"
-    hashes.write_text("5f4dcc3b5aa765d61d8327deb882cf99\n")
+    hashes.write_text("5f4dcc3b5aa765d61d8327deb882cf99\n", encoding="utf-8")
     assert tools_cli.main(["hash-id", str(hashes)]) == 0
     assert "hashcat -m 0" in capsys.readouterr().out
 

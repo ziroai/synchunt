@@ -118,7 +118,7 @@ def test_config_validate_flags_missing_wordlists(tmp_path):
         "    wordlist: 'wordlists/missing.txt'\n"
         "general:\n"
         "  rate_limit: 10\n"
-    )
+    , encoding="utf-8")
     config = ConfigManager(str(path))
     warnings = config.validate(["subdomain", "validation"])
     joined = " ".join(warnings)
@@ -139,7 +139,7 @@ def test_output_dir_and_latest_run(config, output_dir):
 
 def test_config_set_and_reload(tmp_path):
     path = tmp_path / "config.yaml"
-    path.write_text("general:\n  threads: 5\n")
+    path.write_text("general:\n  threads: 5\n", encoding="utf-8")
     config = ConfigManager(str(path))
     config.set("general.threads", 99)
     config.set("brand.new.option", True)

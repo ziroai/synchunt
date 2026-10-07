@@ -162,7 +162,7 @@ def test_notifier_payloads_for_slack_discord_and_telegram(tmp_path):
             "discord": {"enabled": True, "webhook_url": "https://discord.test/x"},
             "telegram": {"enabled": True, "bot_token": "123:abc", "chat_id": "42"},
         }
-    }))
+    }), encoding="utf-8")
     notifier = Notifier(ConfigManager(str(config_file)))
     sent = []
 
@@ -293,7 +293,7 @@ def test_history_finds_previous_run_and_skips_current(tmp_path):
     (old_run / "findings_prioritized").mkdir(parents=True)
     (old_run / "findings_prioritized" / "findings.json").write_text(
         jsonlib.dumps([{"fingerprint": "abc", "title": "old"}])
-    )
+    , encoding="utf-8")
     # a dry-run directory without findings must be ignored
     (slug_dir / "20260102_000000").mkdir()
     current = slug_dir / "20260103_000000"

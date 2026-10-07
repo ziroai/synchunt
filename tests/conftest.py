@@ -141,7 +141,7 @@ def config_path(tmp_path, output_dir):
     # YAML double-quoted scalars interpret backslash escapes, so Windows paths
     # must be written with forward slashes (Path handles both everywhere).
     safe_output_dir = str(output_dir).replace("\\", "/")
-    path.write_text(MINIMAL_CONFIG.format(output_dir=safe_output_dir))
+    path.write_text(MINIMAL_CONFIG.format(output_dir=safe_output_dir), encoding="utf-8")
     return str(path)
 
 
