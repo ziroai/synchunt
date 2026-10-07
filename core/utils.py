@@ -97,6 +97,13 @@ def create_output_structure(base_dir):
     return base_dir
 
 
+def target_slug(target):
+    """Filesystem-safe directory name for a target (matches the output tree)."""
+    value = str(target or "").strip()
+    value = value.replace("https://", "").replace("http://", "")
+    return value.replace("/", "_").replace(":", "_").replace("*", "_")
+
+
 def ensure_dir(path):
     """os.makedirs with empty-dirname safety; returns the directory."""
     if path:

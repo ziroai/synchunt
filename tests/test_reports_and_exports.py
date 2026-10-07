@@ -127,3 +127,161 @@ def test_notifier_builds_messages_when_enabled(ctx):
     ])
     assert any("CRITICAL FINDING" in message for message in sent)
     assert len(sent) == 2
+
+
+def test_data_exporter_respects_format_toggles(tmp_path):
+    from core.models import Finding
+    from reports.data_export import DataExporter
+
+    exporter = DataExporter(str(tmp_path), "example.com")
+    generated = exporter.export_findings(
+        [Finding(category="test", title="t", severity="low")],
+        json_enabled=False,
+        csv_enabled=True,
+    )
+    assert "findings_json" not in generated
+    assert "findings_csv" in generated
+    assert os.path.exists(generated["findings_csv"])
+
+
+# ----------------------------------------------------------------------
+# SARIF export
+# ----------------------------------------------------------------------
+def test_sarif_export_is_valid_and_maps_severities(tmp_path):
+    import json as jsonlib
+
+    from core.models import Finding
+    from reports.sarif_export import SarifExporter
+
+    findings = [
+        Finding(category="api", title="Exposed spec", severity="medium",
+                url="https://example.com/openapi.json", evidence="Test API"),
+        Finding(category="exposure", title=".env exposed", severity="high",
+                url="https://example.com/.env"),
+        Finding(category="api", title="GraphQL introspection", severity="high",
+                url="https://example.com/graphql", extra={"priority": "P1"}),
+    ]
+    path = SarifExporter(str(tmp_path), "example.com", findings,
+                         tool_version="9.9.9").generate()
+    assert os.path.exists(path)
+    doc = jsonlib.load(open(path))
+    run = doc["runs"][0]
+
+    assert doc["version"] == "2.1.0"
+    assert run["tool"]["driver"]["name"] == "SyncHunt"
+    assert run["tool"]["driver"]["version"] == "9.9.9"
+    assert [rule["id"] for rule in run["tool"]["driver"]["rules"]] == [
+        "synchunt/api", "synchunt/exposure",
+    ]
+    assert len(run["results"]) == 3
+    levels = {result["properties"]["severity"]: result["level"] for result in run["results"]}
+    assert levels["high"] == "error"
+    assert levels["medium"] == "warning"
+    for result in run["results"]:
+        assert result["partialFingerprints"]["synchuntFinding/v1"]
+        assert result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+    assert any(result["properties"].get("priority") == "P1" for result in run["results"])
+
+
+# ----------------------------------------------------------------------
+# Scan history diff
+# ----------------------------------------------------------------------
+def test_history_compare_classifies_new_fixed_and_persisting():
+    from core.history import compare
+    from core.models import Finding
+
+    persisting = Finding(category="api", title="Exposed spec", severity="medium",
+                         url="https://x/openapi.json")
+    fresh = Finding(category="exposure", title=".env exposed", severity="high",
+                    url="https://x/.env")
+    previous = [
+        {"fingerprint": persisting.fingerprint(), "title": persisting.title,
+         "severity": "medium", "score": 3.0},
+        {"fingerprint": "gone", "title": "Fixed issue", "severity": "low", "score": 1.0},
+    ]
+    report = compare([persisting, fresh], previous, previous_run="/tmp/old-run")
+
+    counts = report.counts()
+    assert counts["new"] == 1
+    assert counts["fixed"] == 1
+    assert counts["persisting"] == 1
+    assert counts["new_critical_high"] == 1
+    assert persisting.extra["history"] == "persisting"
+    assert fresh.extra["history"] == "new"
+    assert [row["title"] for row in report.fixed] == ["Fixed issue"]
+    assert report.to_dict()["counts"]["new"] == 1
+
+
+def test_history_identity_survives_evidence_changes():
+    """A finding whose evidence changed is still the same issue, not new+fixed."""
+    from core.history import compare
+    from core.models import Finding
+
+    before = Finding(category="exposure", title="Exposed management endpoint: /env",
+                     severity="high", url="http://x/env", evidence="HTML body")
+    after = Finding(category="exposure", title="Exposed management endpoint: /env",
+                    severity="high", url="http://x/env", evidence="{json: true}")
+    assert before.fingerprint() != after.fingerprint()
+
+    report = compare([after], [before.to_dict()], previous_run="/tmp/old")
+    assert report.counts()["new"] == 0
+    assert report.counts()["fixed"] == 0
+    assert report.counts()["persisting"] == 1
+
+
+def test_history_finds_previous_run_and_skips_current(tmp_path):
+    import json as jsonlib
+
+    from core.history import find_previous_run, load_findings, target_slug
+
+    base = tmp_path / "out"
+    slug_dir = base / target_slug("https://example.com:8443")
+    old_run = slug_dir / "20260101_000000"
+    (old_run / "findings_prioritized").mkdir(parents=True)
+    (old_run / "findings_prioritized" / "findings.json").write_text(
+        jsonlib.dumps([{"fingerprint": "abc", "title": "old"}])
+    )
+    # a dry-run directory without findings must be ignored
+    (slug_dir / "20260102_000000").mkdir()
+    current = slug_dir / "20260103_000000"
+    current.mkdir()
+
+    assert find_previous_run(str(base), "https://example.com:8443", str(current)) == str(old_run)
+    assert find_previous_run(str(base), "https://example.com:8443", str(old_run)) is None
+    assert load_findings(str(old_run))[0]["title"] == "old"
+    assert load_findings(str(current)) == []
+
+
+def test_reports_render_history_section(tmp_path):
+    from core.models import Finding
+    from reports.html_report import HTMLReportGenerator
+    from reports.markdown_report import MarkdownReportGenerator
+
+    history = {
+        "previous_run": "/tmp/out/example.com/20260101_000000",
+        "counts": {"new": 1, "fixed": 2, "persisting": 3, "previous_total": 5,
+                   "new_critical_high": 1},
+        "new": [{"fingerprint": "fp", "title": "Regressed <b>issue</b>",
+                 "severity": "high", "url": "https://x/new"}],
+        "fixed": [{"fingerprint": "old", "title": "Gone", "severity": "low",
+                   "url": "https://x/old"}],
+    }
+    findings = [Finding(category="api", title="Current", severity="low",
+                        url="https://x/current")]
+
+    html_path = HTMLReportGenerator(
+        str(tmp_path), "example.com", None, None, findings=findings,
+        history=history,
+    ).generate()
+    html_text = open(html_path).read()
+    assert "Since last scan" in html_text
+    assert "&lt;b&gt;issue&lt;/b&gt;" in html_text  # history entries are escaped too
+
+    md_path = MarkdownReportGenerator(
+        str(tmp_path), "example.com", None, None, findings=findings,
+        history=history,
+    ).generate()
+    markdown = open(md_path).read()
+    assert "Since last scan" in markdown
+    assert "1 new" in markdown and "2 fixed" in markdown
+    assert markdown.count("```") % 2 == 0

@@ -19,11 +19,11 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from colorama import Fore, Style
 
-from core import __version__
+from core import __version__, history as scan_history
 from core.config_manager import ConfigManager
 from core.context import ScanContext
 from core.database_manager import DatabaseManager, default_db_path
@@ -32,6 +32,7 @@ from core.logger import BugHuntLogger
 from core.runner import ToolRunner
 from core.utils import (
     create_output_structure,
+    ensure_dir,
     format_duration,
     get_file_count,
     is_valid_target,
@@ -61,6 +62,7 @@ from reports.data_export import DataExporter
 from reports.html_report import HTMLReportGenerator
 from reports.markdown_report import MarkdownReportGenerator
 from reports.notifier import Notifier
+from reports.sarif_export import SarifExporter
 
 STATE_FILE = "scan_state.json"
 
@@ -179,6 +181,10 @@ class SyncHunt:
         self.notifier = Notifier(self.config, self.logger)
         self.scope: Optional[ScopeManager] = None
         self.selected_phases: List[str] = []
+        # Filled in as targets are scanned; consumed by --json-report
+        self.run_reports: List[Dict[str, Any]] = []
+        self.last_artifacts: Dict[str, str] = {}
+        self.last_history = None
         self._interrupted = False
 
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -329,6 +335,7 @@ class SyncHunt:
 
         self.scan_end = datetime.now()
         duration = (self.scan_end - self.scan_start).total_seconds()
+        self._write_json_report(exit_code, targets, duration)
         self.logger.info("=" * 62)
         self.logger.result(
             f"🏁 All scans complete in {format_duration(duration)}"
@@ -399,6 +406,20 @@ class SyncHunt:
 
         if self.args.dry_run:
             self._print_dry_run(ctx, phases)
+            self.run_reports.append({
+                "target": target,
+                "status": "dry-run",
+                "output_dir": output_dir,
+                "database": db_path,
+                "profile": ctx.profile,
+                "phases": list(phases),
+                "findings": 0,
+                "severity": {},
+                "categories": {},
+                "top_findings": [],
+                "artifacts": {},
+                "history": {},
+            })
             database.finish_scan(scan_id, "dry-run")
             database.close()
             return
@@ -480,6 +501,33 @@ class SyncHunt:
         summary = database.scan_summary(scan_id)
         self._print_summary(target, summary, phases)
         self._send_notifications(ctx, summary)
+
+        top_findings = [
+            {
+                "title": finding.title,
+                "severity": finding.severity,
+                "category": finding.category,
+                "url": finding.url,
+                "score": finding.score,
+                "priority": finding.extra.get("priority", ""),
+            }
+            for finding in database.top_findings(scan_id, limit=10)
+        ]
+        self.run_reports.append({
+            "target": target,
+            "status": "interrupted" if self._interrupted else "finished",
+            "output_dir": output_dir,
+            "database": db_path,
+            "profile": ctx.profile,
+            "phases": [name for name in phases],
+            "findings": summary.get("findings", 0),
+            "severity": summary.get("severity", {}),
+            "categories": summary.get("categories", {}),
+            "top_findings": top_findings,
+            "artifacts": dict(self.last_artifacts),
+            "history": self.last_history.counts() if self.last_history else {},
+        })
+
         database.finish_scan(scan_id, "finished", stats={
             "severity": summary.get("severity", {}),
             "findings": summary.get("findings", 0),
@@ -559,6 +607,28 @@ class SyncHunt:
                 return get_file_count(path)
         return 0
 
+    def _write_json_report(self, exit_code: int, targets: List[str],
+                           duration: float) -> None:
+        """Write a machine-readable run summary for CI/pipelines (--json-report)."""
+        path = getattr(self.args, "json_report", None)
+        if not path:
+            return
+        payload = {
+            "tool": "SyncHunt",
+            "version": __version__,
+            "generated_at": datetime.now().isoformat(),
+            "duration_seconds": round(duration, 2),
+            "exit_code": exit_code,
+            "targets_requested": targets,
+            "targets": self.run_reports,
+        }
+        try:
+            ensure_dir(os.path.dirname(os.path.abspath(path)))
+            save_json(payload, path)
+            self.logger.info(f"JSON report: {os.path.abspath(path)}")
+        except OSError as exc:
+            self.logger.error(f"could not write JSON report: {exc}")
+
     def _generate_reports(self, ctx: ScanContext) -> None:
         self.logger.phase_banner("REPORT GENERATION", 15)
         self.scan_end = datetime.now()
@@ -567,12 +637,35 @@ class SyncHunt:
         if ctx.database is not None and ctx.scan_id is not None:
             findings = ctx.database.findings(ctx.scan_id)
 
+        history_data: Dict[str, Any] = {}
+        self.last_history = None
+        if findings and self.config.get_bool("reporting.track_history", True):
+            previous = scan_history.find_previous_run(
+                self.base_output, ctx.target, ctx.output_dir
+            )
+            if previous:
+                report = scan_history.compare(
+                    findings,
+                    scan_history.load_findings(previous),
+                    previous_run=previous,
+                )
+                self.last_history = report
+                history_data = report.to_dict()
+                save_json(history_data, ctx.path("reports", "history.json"))
+                counts = report.counts()
+                self.logger.found(
+                    f"History vs {os.path.basename(previous)}: {counts['new']} new, "
+                    f"{counts['fixed']} fixed, {counts['persisting']} persisting"
+                )
+
         generated: Dict[str, str] = {}
+        self.last_artifacts = generated
         if self.config.get_bool("reporting.html_report", True):
             try:
                 path = HTMLReportGenerator(
                     ctx.output_dir, ctx.target, self.scan_start, self.scan_end,
                     database=ctx.database, scan_id=ctx.scan_id, findings=findings,
+                    history=history_data or None,
                 ).generate()
                 generated["html"] = path
                 self.logger.found(f"HTML report: {path}")
@@ -584,19 +677,36 @@ class SyncHunt:
                 path = MarkdownReportGenerator(
                     ctx.output_dir, ctx.target, self.scan_start, self.scan_end,
                     database=ctx.database, scan_id=ctx.scan_id, findings=findings,
+                    history=history_data or None,
                 ).generate()
                 generated["markdown"] = path
                 self.logger.found(f"Markdown report: {path}")
             except Exception as exc:
                 self.logger.error(f"Markdown report failed: {exc}")
 
+        if self.config.get_bool("reporting.sarif_export", True):
+            try:
+                path = SarifExporter(
+                    ctx.output_dir, ctx.target, findings,
+                    tool_version=__version__,
+                ).generate()
+                generated["sarif"] = path
+                self.logger.found(f"SARIF export: {path}")
+            except Exception as exc:
+                self.logger.error(f"SARIF export failed: {exc}")
+
         exporter = DataExporter(ctx.output_dir, ctx.target)
         try:
-            generated.update(exporter.export_findings(findings))
+            generated.update(exporter.export_findings(
+                findings,
+                json_enabled=self.config.get_bool("reporting.json_export", True),
+                csv_enabled=self.config.get_bool("reporting.csv_export", True),
+            ))
             if ctx.database is not None and ctx.scan_id is not None:
-                generated["scan_data"] = exporter.export_scan_data(
-                    ctx.database.scan_summary(ctx.scan_id)
-                )
+                scan_data = ctx.database.scan_summary(ctx.scan_id)
+                if history_data:
+                    scan_data["history"] = history_data
+                generated["scan_data"] = exporter.export_scan_data(scan_data)
         except Exception as exc:
             self.logger.error(f"data export failed: {exc}")
 
@@ -737,6 +847,7 @@ Examples:
   synchunt -l targets.txt --profile balanced --resume
   synchunt -d example.com --scope-file scope.txt --out-of-scope-file oos.txt
   synchunt -d example.com --dry-run            # show the plan, send no traffic
+  synchunt -d example.com --full --json-report summary.json   # CI-friendly summary
   synchunt --doctor                            # dependencies + config check
   synchunt --list-phases
         """,
@@ -758,6 +869,8 @@ Examples:
     scan_group.add_argument("--threads", type=int, help="worker threads")
     scan_group.add_argument("--timeout", type=int, help="per-tool timeout in seconds")
     scan_group.add_argument("--rate-limit", type=float, help="HTTP requests per second")
+    scan_group.add_argument("--json-report", metavar="PATH",
+                            help="write a machine-readable JSON summary for CI")
 
     scope_group = parser.add_argument_group("Scope")
     scope_group.add_argument("--scope-file", help="file with in-scope entries")

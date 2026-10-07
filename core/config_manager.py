@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from core.utils import target_slug
+
 DEFAULT_PROFILE = "balanced"
 
 
@@ -122,17 +124,14 @@ class ConfigManager:
                        base_dir: Optional[str] = None) -> str:
         """Get the output directory for a target and run."""
         base = base_dir or self.get("general.output_dir", "output")
-        safe_target = str(target).replace("https://", "").replace("http://", "")
-        safe_target = safe_target.replace("/", "_").replace(":", "_").replace("*", "_")
+        safe_target = target_slug(target)
         run = run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(base, safe_target, run)
 
     def latest_output_dir(self, target: str, base_dir: Optional[str] = None) -> Optional[str]:
         """Most recent output directory for a target (used by --resume)."""
         base = base_dir or self.get("general.output_dir", "output")
-        safe_target = str(target).replace("https://", "").replace("http://", "")
-        safe_target = safe_target.replace("/", "_").replace(":", "_").replace("*", "_")
-        target_dir = os.path.join(base, safe_target)
+        target_dir = os.path.join(base, target_slug(target))
         if not os.path.isdir(target_dir):
             return None
         runs = sorted(

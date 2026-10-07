@@ -23,7 +23,9 @@
 - **Scope enforced before active tooling** — wildcard domains, IPs/CIDRs and `host:port` entries; in-scope/out-of-scope files; nothing leaves your scope.
 - **SQLite correlation store** — every scan writes `synchunt_results.db` (scans, phases, assets, findings) with fingerprint-based de-duplication.
 - **Heuristic prioritisation, not just severity** — findings are scored (impact, confidence, exposure, CVSS-style bonuses) and ranked P1–P4 with reasons you can read.
-- **Reports that are ready to share** — dark-theme HTML, Markdown, JSON and CSV exports, plus optional Slack/Discord/Telegram notifications.
+- **Reports that are ready to share** — dark-theme HTML, Markdown, JSON, CSV and **SARIF 2.1.0** (GitHub code scanning / CI dashboards), plus optional Slack/Discord/Telegram notifications.
+- **Re-scan diffing** — every run is compared against the previous one for the same target: *new*, *fixed* and *persisting* findings are shown in the reports (`reports/history.json`).
+- **CI-native** — `--json-report summary.json` writes a machine-readable run summary (findings, severities, top findings, artifact paths, history counts) and the exit code reflects the result.
 - **Resumable** — re-run with `--resume` and completed phases are skipped.
 - **Graceful degradation** — every phase works with the tools you have; missing optional tools are skipped with a clear hint, and several phases have built-in fallbacks (crt.sh, HTTP prober, header fingerprinting, OpenAPI/GraphQL probes, cloud-bucket enumeration).
 - **Safe by construction** — no `shell=True` anywhere in the scanning path, rate-limited HTTP session, redacted secrets in output, escaped report rendering.
@@ -100,6 +102,7 @@ python3 main.py -d example.com [options]
 | `--resume` | continue the latest run for this target (completed phases are skipped) |
 | `--dry-run` | print the plan and exit |
 | `--output-dir` | base output directory (default `output/`) |
+| `--json-report PATH` | write a machine-readable JSON summary of the run (CI-friendly) |
 | `--threads`, `--timeout`, `--rate-limit` | concurrency / per-tool timeout / HTTP rate limit |
 | `--scope-file`, `--out-of-scope-file` | scope files loaded on top of `config.yaml` |
 | `--config` | config file path (default `config.yaml`) |
@@ -121,7 +124,11 @@ python3 main.py -d target.com --full --resume
 
 # Custom output location
 python3 main.py -d target.com --profile full --output-dir /data/scans
+
+# CI: machine-readable summary + SARIF for GitHub code scanning
+python3 main.py -d target.com --profile balanced --json-report summary.json
 ```
+
 
 ### Profiles
 
@@ -180,7 +187,8 @@ output/
         ├── sensitive_info/        # dorks and exposed-data results
         ├── screenshots/           # visual captures
         ├── findings_prioritized/  # findings.json/csv, prioritized.md, top_findings.txt
-        ├── reports/               # report.html, report.md, findings.json/csv, scan_data.json
+        ├── reports/               # report.html, report.md, results.sarif,
+        │                          # history.json, findings.json/csv, scan_data.json
         ├── scan_state.json        # resume state
         └── synchunt_results.db    # SQLite correlation DB
 ```
@@ -196,6 +204,40 @@ SELECT phase, status, result_count FROM phases ORDER BY id;
 ```
 
 ---
+
+## 🕓 Re-scan diffing
+
+Point SyncHunt at the same target twice and the second report tells you what changed:
+
+```text
+[20:18:08] 🎯 [ FOUND ] History vs 20261007_201758: 1 new, 1 fixed, 3 persisting
+```
+
+- `reports/history.json` — machine-readable `new` / `fixed` / `persisting` lists and counts
+- the HTML and Markdown reports gain a **"Since last scan"** section (new findings first, fixed ones collapsed)
+- `reports/findings.csv` gains a `history` column (`new` / `persisting`)
+- every finding is matched on category + title + location, so a changed response body is still the *same* finding, not a new one
+
+Disable with `reporting.track_history: false`.
+
+## 🤖 CI / automation
+
+```bash
+python3 main.py -d target.com --profile balanced --json-report summary.json
+python3 main.py -d target.com --profile balanced --quiet
+```
+
+- `--json-report` writes the run summary (`tool`, `version`, `exit_code`, per-target `findings`, `severity`, `categories`, `top_findings`, `artifacts`, `history`).
+- `reports/results.sarif` can be uploaded straight to GitHub code scanning:
+
+```yaml
+- run: python3 main.py -d example.com --profile balanced
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: output/example.com/**/reports/results.sarif
+```
+
+- Exit codes: `0` ok · `1` error · `2` usage · `3` no targets · `130` interrupted — fail your pipeline on anything `>= 2`.
 
 ## 🔧 Configuration
 
@@ -238,7 +280,7 @@ notifications:
 ```bash
 pip install -r requirements-dev.txt
 
-python3 -m pytest tests -q                 # unit + integration tests
+python3 -m pytest tests -q                 # 87 unit + integration tests
 python3 -m pyflakes core modules reports main.py tests
 python3 -m compileall -q core modules reports main.py
 

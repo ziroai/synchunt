@@ -15,6 +15,7 @@ from core.utils import ensure_dir, get_timestamp, save_csv, save_json
 FINDING_FIELDS = [
     "fingerprint", "priority", "score", "severity", "confidence", "category",
     "title", "url", "target", "evidence", "source", "tags", "score_reasons",
+    "history",
 ]
 
 
@@ -28,7 +29,8 @@ class DataExporter:
         ensure_dir(self.export_dir)
 
     # ------------------------------------------------------------------
-    def export_findings(self, findings: Iterable[Finding]) -> Dict[str, str]:
+    def export_findings(self, findings: Iterable[Finding], json_enabled: bool = True,
+                        csv_enabled: bool = True) -> Dict[str, str]:
         rows: List[Dict[str, Any]] = []
         for finding in findings:
             row = finding.to_dict()
@@ -36,13 +38,19 @@ class DataExporter:
             reasons = finding.extra.get("score_reasons") or []
             row["score_reasons"] = "; ".join(reasons) if isinstance(reasons, list) else str(reasons)
             row["tags"] = ",".join(row.get("tags") or [])
+            row["history"] = finding.extra.get("history", "")
             rows.append(row)
 
-        json_path = os.path.join(self.export_dir, "findings.json")
-        csv_path = os.path.join(self.export_dir, "findings.csv")
-        save_json(rows, json_path)
-        save_csv(rows, csv_path, fieldnames=FINDING_FIELDS)
-        return {"findings_json": json_path, "findings_csv": csv_path}
+        generated: Dict[str, str] = {}
+        if json_enabled:
+            path = os.path.join(self.export_dir, "findings.json")
+            save_json(rows, path)
+            generated["findings_json"] = path
+        if csv_enabled:
+            path = os.path.join(self.export_dir, "findings.csv")
+            save_csv(rows, path, fieldnames=FINDING_FIELDS)
+            generated["findings_csv"] = path
+        return generated
 
     # ------------------------------------------------------------------
     def export_scan_data(self, data: Dict[str, Any]) -> str:

@@ -26,7 +26,8 @@ class HTMLReportGenerator:
     """Generate a self-contained HTML report."""
 
     def __init__(self, output_dir, target, scan_start, scan_end,
-                 database=None, scan_id=None, findings: Optional[List[Finding]] = None):
+                 database=None, scan_id=None, findings: Optional[List[Finding]] = None,
+                 history: Optional[Dict] = None):
         self.output_dir = output_dir
         self.target = target
         self.scan_start = scan_start
@@ -34,6 +35,7 @@ class HTMLReportGenerator:
         self.database = database
         self.scan_id = scan_id
         self._findings = findings
+        self.history = history or {}
         self.report_dir = os.path.join(output_dir, "reports")
         os.makedirs(self.report_dir, exist_ok=True)
 
@@ -93,6 +95,7 @@ class HTMLReportGenerator:
             "severity": severity_counts,
             "priority": priority_counts,
             "finding_count": len(findings),
+            "history": self.history,
             "subdomains": _lines("subdomains", "all_subdomains.txt"),
             "live_hosts": _lines("dns", "live_hosts.txt"),
             "open_ports": _lines("ports", "all_ports.txt"),
@@ -175,6 +178,36 @@ class HTMLReportGenerator:
                 parts.append("</div>")
                 rows.append("".join(parts))
             return "".join(rows)
+
+        def _history_section(history: Dict) -> str:
+            if not history or not history.get("previous_run"):
+                return ""
+            counts = history.get("counts") or {}
+            rows = history.get("new") or []
+            if rows:
+                items = []
+                for row in rows[:30]:
+                    severity = str(row.get("severity") or "info").lower()
+                    items.append(
+                        f'<div class="vuln-item vuln-{e(severity)}"><div class="vuln-head">'
+                        f'<span class="badge">{e(severity.upper())}</span>'
+                        f'<span class="vuln-title">{e(str(row.get("title") or ""))}</span>'
+                        f'</div><div class="vuln-meta">{e(str(row.get("url") or ""))}</div></div>'
+                    )
+                new_block = "".join(items)
+            else:
+                new_block = '<div class="item muted">nothing new</div>'
+            return (
+                f'<div class="section">'
+                f'<h2>🕓 Since last scan ({e(os.path.basename(str(history["previous_run"])))})</h2>'
+                f'<div class="stats-grid" style="margin-bottom:14px">'
+                f'{_stat(counts.get("new", 0), "New", "high")}'
+                f'{_stat(counts.get("fixed", 0), "Fixed")}'
+                f'{_stat(counts.get("persisting", 0), "Persisting")}'
+                f'</div>'
+                f'<div class="data-list" style="max-height:420px">{new_block}</div>'
+                f'</div>'
+            )
 
         severity = data["severity"]
         priority = data["priority"]
@@ -267,6 +300,8 @@ class HTMLReportGenerator:
     {_stat(len(data['public_buckets']), 'Public buckets', 'critical')}
     {_stat(len(data['secrets']), 'Secrets', 'warning')}
   </div>
+
+  {_history_section(data.get('history') or {})}
 
   <div class="section">
     <h2>🎯 Prioritised findings ({data['finding_count']})</h2>

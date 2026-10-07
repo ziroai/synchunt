@@ -407,6 +407,8 @@ reporting:
   enabled: true
   html_report: true
   markdown_report: true
+  sarif_export: true             # reports/results.sarif (GitHub code scanning / CI)
+  track_history: true            # diff against the previous run for this target
   json_export: true
   csv_export: true
 

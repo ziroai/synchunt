@@ -25,11 +25,13 @@ main.py                      CLI + orchestrator (phase registry, resume, reports
 │   ├── models.py            Finding / Asset / PhaseResult dataclasses
 │   ├── net.py               shared HTTP layer (rate limiter, retries, TLS, DNS)
 │   ├── secrets.py           secret pattern engine (entropy gate + redaction)
+│   ├── history.py           re-scan diffing (new / fixed / persisting)
 │   ├── utils.py             scope/domain/URL helpers, IO, shell-free command helpers
 │   ├── logger.py            console + per-run file logging
 │   └── dependency_checker.py external tool detection and install hints
 │
-└── reports/                 html_report, markdown_report, data_export, notifier
+└── reports/                 html_report, markdown_report, data_export,
+                             sarif_export, notifier
 ```
 
 Dependency direction is one-way: `modules → core → (stdlib)`, and `reports → core`. Nothing in `core/` imports a phase module.
@@ -107,9 +109,28 @@ Helper queries used by the orchestrator and reports: `completed_phases`, `add_as
 
 - **`core/net.py`** — every HTTP call goes through a `requests.Session` built by `build_session()` with retries and a shared `RateLimiter`. `HttpResult` wraps status/headers/text/error and exposes `.ok`, `.reachable`, `.header(name)`. `probe()` never follows redirects; JSON APIs use `http_request`/`post_json`. TLS peer info, DNS resolution and scheme discovery live here too.
 - **`core/secrets.py`** — ~20 built-in patterns (cloud keys, tokens, private keys, connection strings, …) combined with `js_analysis.custom_regex.patterns` from config via `build_patterns()`. Matches below the entropy threshold are dropped; `SecretMatch.to_dict()` redacts the value and `fingerprint()` supports de-duplication.
-- **`core/utils.py`** — scope matching (`is_in_scope`, `host_matches_domain`) is boundary-correct and supports domains, wildcards, IPs, CIDRs and `host:port`; `get_root_domain` understands multi-part TLDs; command construction uses argument lists (`runner_command`, `quote_args`) so nothing touches a shell.
+- **`core/utils.py`** — `target_slug()` is the single source of truth for the `output/<target>/<run>` directory names (used by `ConfigManager.get_output_dir`, `latest_output_dir` and scan history); scope matching (`is_in_scope`, `host_matches_domain`) is boundary-correct and supports domains, wildcards, IPs, CIDRs and `host:port`; `get_root_domain` understands multi-part TLDs; command construction uses argument lists (`runner_command`, `quote_args`) so nothing touches a shell.
 
-## 6. Configuration model
+## 6. Re-scan diffing
+
+`core/history.py` compares a finished scan with the most recent earlier run for the same target:
+
+- `find_previous_run(base_output, target, current_run_dir)` walks `base_output/<target_slug>/` newest-first, skipping the current run and any directory without a findings file (dry-runs, interrupted first passes).
+- `load_findings(run_dir)` reads `findings_prioritized/findings.json` (falling back to `reports/findings.json`).
+- `compare(current, previous)` matches on **identity** (category + title + location) first and the exact fingerprint second, annotates each current `Finding` with `extra["history"] = "new" | "persisting"` and returns a `HistoryReport` with `new`, `fixed`, `persisting` and `previous_total` counts.
+
+Matching on identity rather than the fingerprint matters: the fingerprint includes evidence (correct for de-duplicating one run), so a response body changing one byte would otherwise look like one issue fixed plus one issue discovered.
+
+The report phase writes `reports/history.json`, adds a "Since last scan" section to the HTML/Markdown reports, adds a `history` column to the CSV/JSON exports and includes the counts in `scan_data.json` and in `--json-report`.
+
+## 7. CI exports
+
+- **`reports/sarif_export.py`** — SARIF 2.1.0 log compatible with GitHub code scanning and other CI dashboards. One SARIF *rule* per finding category (`synchunt/<category>`), results sorted by severity, severities mapped to `error` / `warning` / `note`, fingerprints in `partialFingerprints` so alerts survive re-runs, and severity/priority/score/source preserved in `properties`.
+- **`--json-report PATH`** — one JSON document per invocation: tool + version, duration, exit code, requested targets, and per-target status, severity/category counts, top findings, artifact paths and history counts. `run_reports` is built as targets finish and written by `_write_json_report()` in `main.py`.
+
+Both are controlled by `reporting.sarif_export` / `reporting.track_history` and are on by default.
+
+## 8. Configuration model
 
 `ConfigManager` loads `config.yaml` and exposes:
 
@@ -122,7 +143,7 @@ Helper queries used by the orchestrator and reports: `completed_phases`, `add_as
 
 CLI flags override config values; environment variables can supply secrets (GitHub token, Shodan key, webhooks).
 
-## 7. Adding a phase
+## 9. Adding a phase
 
 1. Create `modules/my_phase.py` with a class that takes `ScanContext` and implements `run_all() -> str | None`.
 2. Read inputs via `ctx.resolve_file(key, *default_parts)`, write outputs under `ctx.path("my_phase")`.
@@ -130,20 +151,20 @@ CLI flags override config values; environment variables can supply secrets (GitH
 4. Register the phase in `main.py` (`PHASES`), add artifact keys to `DEFAULT_FILES`, and add the phase to any profile that should include it.
 5. Add tests under `tests/`. Use the `local_server` fixture rather than the network; mock `ToolRunner.run` for external tools.
 
-## 8. Adding a tool to an existing phase
+## 10. Adding a tool to an existing phase
 
 1. Add a `tool_name: {enabled: true}` block to the phase section in `config.yaml`.
 2. In the module, gate on `self.config.is_tool_enabled("phase", "tool")` and run it through `ctx.runner.run(argv, timeout=…)`.
 3. Prefer machine-readable output (`-json`, `-jsonl`) and parse it; never build commands with `shell=True`.
 
-## 9. Testing strategy
+## 11. Testing strategy
 
 - `tests/conftest.py` provides fixtures: `config_path` (minimal config with external tools disabled), `config`, `logger`, `runner`, `ctx` (temporary run directory + SQLite scan), and `local_server` (a deterministic HTTP fixture serving an OpenAPI spec, GraphQL introspection, admin paths, etc.).
 - `tests/test_phases_local.py` runs real phases against the fixture server.
 - `tests/test_cli.py` covers the documented CLI behaviour, including `--check-deps`, `--doctor`, `--list-phases`, phase selection and target parsing.
 - `tests/test_reports_and_exports.py` covers HTML escaping, Markdown rendering and the JSON/CSV exporters.
 
-## 10. Security model
+## 12. Security model
 
 - All command execution is argument-list based (`ToolRunner`); user/target-derived strings never reach a shell.
 - Active work is scope-filtered; scope is enforced as soon as a host list exists and never loosens mid-run.

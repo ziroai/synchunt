@@ -126,6 +126,22 @@ def test_target_parsing_handles_urls_ips_and_ports(tmp_path, config_path):
     assert "not valid" not in targets
 
 
+def test_dry_run_writes_json_report(monkeypatch, tmp_path, config_path):
+    import json as jsonlib
+
+    summary = tmp_path / "dry-summary.json"
+    monkeypatch.setattr(
+        sys, "argv",
+        ["synchunt", "-d", "example.com", "--dry-run", "--config", config_path,
+         "--output-dir", str(tmp_path / "out"), "--json-report", str(summary)],
+    )
+    assert cli.main() == 0
+    payload = jsonlib.loads(summary.read_text())
+    assert payload["targets"][0]["status"] == "dry-run"
+    assert payload["targets"][0]["phases"]
+    assert payload["exit_code"] == 0
+
+
 def test_result_count_reads_jsonl_artifacts(config_path, ctx):
     """Regression: .jsonl artifacts used to be parsed with the JSON loader."""
     args = cli.parse_arguments(["-d", "example.com", "--config", config_path])
@@ -167,11 +183,12 @@ def test_end_to_end_run_against_local_server(monkeypatch, tmp_path, local_server
         "  html_report: true\n"
         "  markdown_report: true\n"
     )
+    json_report = tmp_path / "summary.json"
     monkeypatch.setattr(
         sys, "argv",
         ["synchunt", "-d", local_server, "--output-dir", str(output),
          "--phase", "enrichment,api_discovery,prioritize,report",
-         "--config", str(config), "--quiet"],
+         "--config", str(config), "--quiet", "--json-report", str(json_report)],
     )
     assert cli.main() == 0
 
@@ -186,6 +203,17 @@ def test_end_to_end_run_against_local_server(monkeypatch, tmp_path, local_server
     assert list(output.rglob("findings.csv")), "CSV export should exist"
     assert list(output.rglob("synchunt_results.db")), "correlation DB should exist"
     assert list(output.rglob("report.md")), "markdown report should exist"
+    assert list(output.rglob("results.sarif")), "SARIF export should exist"
+
+    import json as jsonlib
+
+    summary = jsonlib.loads(json_report.read_text())
+    assert summary["tool"] == "SyncHunt"
+    assert summary["exit_code"] == 0
+    # targets are normalised (scheme stripped) before scanning
+    assert summary["targets"][0]["target"] == local_server.split("://", 1)[-1]
+    assert summary["targets"][0]["findings"] >= 1
+    assert summary["targets"][0]["artifacts"], "artifact paths should be reported"
 
 
 def test_resume_skips_completed_phases(monkeypatch, tmp_path, local_server):

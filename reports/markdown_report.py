@@ -16,7 +16,8 @@ class MarkdownReportGenerator:
     """Generate a Markdown report suitable for tickets and PR comments."""
 
     def __init__(self, output_dir, target, scan_start, scan_end,
-                 database=None, scan_id=None, findings: Optional[List[Finding]] = None):
+                 database=None, scan_id=None, findings: Optional[List[Finding]] = None,
+                 history: Optional[Dict] = None):
         self.output_dir = output_dir
         self.target = target
         self.scan_start = scan_start
@@ -24,6 +25,7 @@ class MarkdownReportGenerator:
         self.database = database
         self.scan_id = scan_id
         self._findings = findings
+        self.history = history or {}
         self.report_dir = os.path.join(output_dir, "reports")
         os.makedirs(self.report_dir, exist_ok=True)
 
@@ -88,6 +90,43 @@ class MarkdownReportGenerator:
         for prio in ("P1", "P2", "P3", "P4"):
             lines.append(f"| Priority {prio} | {priority_counts.get(prio, 0)} |")
         lines.append("")
+
+        history = self.history
+        if history.get("previous_run"):
+            counts = history.get("counts") or {}
+            lines += [
+                "## 🕓 Since last scan",
+                "",
+                f"Compared with `{os.path.basename(str(history['previous_run']))}`: "
+                f"**{counts.get('new', 0)} new**, **{counts.get('fixed', 0)} fixed**, "
+                f"**{counts.get('persisting', 0)} persisting**.",
+                "",
+            ]
+            new_findings = history.get("new") or []
+            if new_findings:
+                lines += [
+                    "| Severity | Title | Location |",
+                    "|----------|-------|----------|",
+                ]
+                for row in new_findings[:25]:
+                    title = str(row.get("title") or "").replace("|", "\\|")[:90]
+                    location = str(row.get("url") or "").replace("|", "\\|")[:70]
+                    lines.append(
+                        f"| {str(row.get('severity') or '').upper()} | {title} | {location} |"
+                    )
+                lines.append("")
+            fixed_findings = history.get("fixed") or []
+            if fixed_findings:
+                lines += [
+                    f"<details><summary>Fixed since last scan ({len(fixed_findings)})"
+                    "</summary>",
+                    "",
+                ]
+                for row in fixed_findings[:50]:
+                    title = str(row.get("title") or "").replace("|", "\\|")[:90]
+                    location = str(row.get("url") or "")
+                    lines.append(f"- ~~{title}~~ — {location}")
+                lines += ["", "</details>", ""]
 
         for label, path in (
             ("Subdomains", ("subdomains", "all_subdomains.txt")),
