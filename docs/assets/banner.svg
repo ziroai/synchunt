@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-label="SyncHunt - automated recon and vulnerability scanning">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1020"/>
+      <stop offset="55%" stop-color="#131a2f"/>
+      <stop offset="100%" stop-color="#1b1030"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff6b6b"/>
+      <stop offset="50%" stop-color="#ffb86b"/>
+      <stop offset="100%" stop-color="#8a5cf6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8a5cf6" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#8a5cf6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="320" rx="18" fill="url(#bg)"/>
+  <circle cx="1010" cy="70" r="220" fill="url(#glow)"/>
+  <circle cx="120" cy="270" r="160" fill="url(#glow)" opacity="0.6"/>
+
+  <!-- crosshair mark -->
+  <g stroke="url(#accent)" stroke-width="6" fill="none" stroke-linecap="round">
+    <circle cx="150" cy="130" r="46"/>
+    <circle cx="150" cy="130" r="10" fill="url(#accent)" stroke="none"/>
+    <path d="M150 60 V96"/>
+    <path d="M150 164 V200"/>
+    <path d="M80 130 H116"/>
+    <path d="M184 130 H220"/>
+  </g>
+
+  <text x="260" y="132" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="76" font-weight="700" fill="#f5f7ff" letter-spacing="1">SyncHunt</text>
+  <text x="262" y="176" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="26" fill="#9fb0d0">Automated recon &amp; vulnerability scanning</text>
+
+  <rect x="262" y="204" width="128" height="34" rx="17" fill="none" stroke="#ff6b6b" stroke-width="2"/>
+  <text x="326" y="227" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" fill="#ffb0b0" letter-spacing="2">AUTHORISED</text>
+
+  <text x="410" y="227" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" fill="#7f92b3">16 phases · 63 tools · 8 languages · Linux / macOS / Windows</text>
+
+  <rect x="0" y="286" width="1200" height="8" fill="url(#accent)"/>
+</svg>

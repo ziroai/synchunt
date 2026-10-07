@@ -1,130 +1,174 @@
 """
-BugHuntRecon - Screenshot & Visual Recon Module
-Integrates: Gowitness, Aquatone
+SyncHunt - Visual Recon
+Screenshots of live web applications via gowitness (v3 or v2 syntax) or
+aquatone, so findings can be verified visually at triage time.
 """
+
+from __future__ import annotations
 
 import os
 import time
-from core.utils import read_file_lines
+from typing import List
+
+from core.models import Asset
+from core.utils import read_file_lines, write_file_lines
 
 
 class ScreenshotCapture:
-    """Capture screenshots of live web applications."""
+    """Capture screenshots of live hosts."""
 
-    def __init__(self, config, runner, logger, output_dir, live_hosts_file):
-        self.config = config
-        self.runner = runner
-        self.logger = logger
-        self.output_dir = os.path.join(output_dir, "screenshots")
-        self.live_hosts_file = live_hosts_file
-
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self.config = ctx.config
+        self.runner = ctx.runner
+        self.logger = ctx.logger
+        self.output_dir = ctx.path("screenshots")
+        self.live_hosts_file = ctx.resolve_file("live_hosts", "dns", "live_hosts.txt")
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def run_all(self):
-        """Run all screenshot tools."""
-        self.logger.phase_banner("VISUAL RECON / SCREENSHOTS", 9)
-        start_time = time.time()
+    # ------------------------------------------------------------------
+    def run_all(self) -> str:
+        self.logger.phase_banner("VISUAL RECON", 14)
+        started = time.time()
 
-        live_hosts = read_file_lines(self.live_hosts_file)
-        if not live_hosts:
-            self.logger.warning("No live hosts for screenshots!")
-            return None
+        hosts = read_file_lines(self.live_hosts_file)
+        if not hosts:
+            self.logger.warning("No live hosts for screenshots")
+            return self.output_dir
 
-        self.logger.info(f"Taking screenshots of {len(live_hosts)} hosts...")
+        self.logger.info(f"Capturing screenshots for {len(hosts)} host(s)...")
+        captured = 0
+        if self.config.is_tool_enabled("screenshots", "gowitness"):
+            captured += self.run_gowitness()
+        if self.config.is_tool_enabled("screenshots", "aquatone") and captured == 0:
+            captured += self.run_aquatone()
+        if self.config.is_tool_enabled("screenshots", "eyewitness") and captured == 0:
+            captured += self.run_eyewitness()
 
-        # Gowitness
-        if self.config.is_tool_enabled('screenshots', 'gowitness'):
-            try:
-                self.run_gowitness()
-            except Exception as e:
-                self.logger.error(f"Gowitness failed: {str(e)}")
+        if captured == 0:
+            self.logger.skip(
+                "no screenshot tool available (install gowitness or aquatone)"
+            )
 
-        # Aquatone
-        if self.config.is_tool_enabled('screenshots', 'aquatone'):
-            try:
-                self.run_aquatone()
-            except Exception as e:
-                self.logger.error(f"Aquatone failed: {str(e)}")
-
-        duration = time.time() - start_time
-        self.logger.result(f"Screenshots Complete in {duration:.1f}s")
-
+        self.logger.result(
+            f"Visual Recon Complete: {captured} screenshot(s) in {time.time() - started:.1f}s"
+        )
         return self.output_dir
 
-    def run_gowitness(self):
-        """Run Gowitness for screenshots."""
-        self.logger.info("Running Gowitness...")
+    # ------------------------------------------------------------------
+    def _hosts_limited(self) -> List[str]:
+        limit = self.config.get_int("screenshots.max_hosts", 100)
+        return read_file_lines(self.live_hosts_file)[:limit]
 
-        tool_config = self.config.get_tool_config('screenshots', 'gowitness')
+    def _count_images(self, directory: str) -> int:
+        if not os.path.isdir(directory):
+            return 0
+        count = 0
+        for root, _dirs, files in os.walk(directory):
+            count += sum(1 for name in files if name.lower().endswith((".png", ".jpg", ".jpeg")))
+        return count
 
+    def run_eyewitness(self) -> int:
+        """EyeWitness: screenshots plus a server-header report (opt-in)."""
+        binary = next(
+            (name for name in ("eyewitness", "EyeWitness", "EyeWitness.py")
+             if self.runner.is_available(name)),
+            "",
+        )
+        if not binary:
+            self.logger.debug("EyeWitness is not installed - skipping")
+            return 0
+        cfg = self.config.get_tool_config("screenshots", "eyewitness")
+        hosts_file = os.path.join(self.output_dir, "eyewitness_targets.txt")
+        write_file_lines(hosts_file, self._hosts_limited())
+        report_dir = os.path.join(self.output_dir, "eyewitness")
+        os.makedirs(report_dir, exist_ok=True)
+        cmd = [
+            binary, "--web", "-f", hosts_file, "-d", report_dir,
+            "--no-prompt", "--timeout", str(cfg.get("timeout", 20)),
+        ]
+        if cfg.get("threads"):
+            cmd += ["--threads", str(cfg["threads"])]
+        self.logger.info("Running EyeWitness...")
+        self.runner.run(cmd, tool_name="eyewitness", timeout=1800)
+        return self._count_images(report_dir)
+
+    def run_gowitness(self) -> int:
+        if self.runner.require("gowitness"):
+            return 0
+
+        cfg = self.config.get_tool_config("screenshots", "gowitness")
         gowitness_dir = os.path.join(self.output_dir, "gowitness")
         os.makedirs(gowitness_dir, exist_ok=True)
+        hosts_file = os.path.join(self.output_dir, "screenshot_targets.txt")
+        from core.utils import write_file_lines
 
-        threads = tool_config.get('threads', 10)
-        timeout = tool_config.get('timeout', 10)
-        resolution = tool_config.get('resolution', '1440,900')
+        write_file_lines(hosts_file, self._hosts_limited())
 
-        res_parts = resolution.split(',')
-        res_x = res_parts[0] if len(res_parts) > 0 else '1440'
-        res_y = res_parts[1] if len(res_parts) > 1 else '900'
-
-        cmd = (
-            f"gowitness file -f {self.live_hosts_file} "
-            f"--threads {threads} "
-            f"--timeout {timeout} "
-            f"--resolution-x {res_x} "
-            f"--resolution-y {res_y} "
-            f"--screenshot-path {gowitness_dir}"
-        )
-
-        result = self.runner.run(cmd, tool_name="gowitness", timeout=1800)
-
-        # Count screenshots
-        screenshots = [
-            f for f in os.listdir(gowitness_dir)
-            if f.endswith(('.png', '.jpg', '.jpeg'))
+        resolution = str(cfg.get("resolution", "1440,900")).split(",")
+        res_x = resolution[0] if resolution else "1440"
+        res_y = resolution[1] if len(resolution) > 1 else "900"
+        common = [
+            "--threads", str(cfg.get("threads", 10)),
+            "--timeout", str(cfg.get("timeout", 10)),
         ]
 
-        self.logger.found(f"Gowitness: {len(screenshots)} screenshots captured")
+        self.logger.info("Running gowitness...")
+        # gowitness v3 uses subcommands ("scan file"), v2 used "file".
+        attempts = [
+            ["gowitness", "scan", "file", "-f", hosts_file,
+             "--screenshot-path", gowitness_dir, *common],
+            ["gowitness", "file", "-f", hosts_file,
+             "--screenshot-path", gowitness_dir,
+             "--resolution-x", str(res_x), "--resolution-y", str(res_y), *common],
+        ]
+        for cmd in attempts:
+            result = self.runner.run(cmd, tool_name="gowitness", timeout=3600)
+            if result.get("success") or self._count_images(gowitness_dir) > 0:
+                break
 
-        # Generate report
-        cmd_report = (
-            f"gowitness report generate "
-            f"--screenshot-path {gowitness_dir}"
-        )
-        self.runner.run(cmd_report, tool_name="gowitness-report", timeout=60)
+        captured = self._count_images(gowitness_dir)
+        if captured:
+            self.logger.found(f"gowitness: {captured} screenshot(s)")
+            self.runner.run(
+                ["gowitness", "report", "generate", "--screenshot-path", gowitness_dir],
+                tool_name="gowitness-report", timeout=120,
+            )
+            self.ctx.record_assets(
+                [
+                    Asset(kind="screenshot", value=f"{gowitness_dir}/{name}",
+                          source="screenshots")
+                    for name in os.listdir(gowitness_dir)
+                    if name.lower().endswith((".png", ".jpg", ".jpeg"))
+                ]
+            )
+        return captured
 
-    def run_aquatone(self):
-        """Run Aquatone for visual recon."""
-        self.logger.info("Running Aquatone...")
+    def run_aquatone(self) -> int:
+        if self.runner.require("aquatone"):
+            return 0
 
-        tool_config = self.config.get_tool_config('screenshots', 'aquatone')
-
+        cfg = self.config.get_tool_config("screenshots", "aquatone")
         aquatone_dir = os.path.join(self.output_dir, "aquatone")
         os.makedirs(aquatone_dir, exist_ok=True)
+        seed = "\n".join(self._hosts_limited()) + "\n"
 
-        threads = tool_config.get('threads', 5)
-        timeout = tool_config.get('timeout', 15000)
-
-        cmd = (
-            f"cat {self.live_hosts_file} | aquatone "
-            f"-threads {threads} "
-            f"-http-timeout {timeout} "
-            f"-out {aquatone_dir}"
-        )
-
-        result = self.runner.run(
-            cmd,
+        self.logger.info("Running aquatone...")
+        self.runner.run_with_stdin(
+            [
+                "aquatone",
+                "-threads", str(cfg.get("threads", 5)),
+                "-http-timeout", str(cfg.get("timeout", 15000)),
+                "-out", aquatone_dir,
+            ],
+            seed,
             tool_name="aquatone",
-            timeout=1800,
-            shell=True
+            timeout=3600,
         )
-
-        # Check for report
-        report_file = os.path.join(aquatone_dir, "aquatone_report.html")
-        if os.path.exists(report_file):
-            self.logger.found(
-                f"Aquatone: Report generated at {report_file}"
-            )
-        else:
-            self.logger.info("Aquatone processing complete")
+        captured = self._count_images(aquatone_dir)
+        report = os.path.join(aquatone_dir, "aquatone_report.html")
+        if os.path.exists(report):
+            self.logger.found(f"aquatone report: {report}")
+        if captured:
+            self.logger.found(f"aquatone: {captured} screenshot(s)")
+        return captured

@@ -1,0 +1,166 @@
+name: "SyncHunt"
+description: "Automated recon & vulnerability scanning (16 phases) with SARIF output for GitHub code scanning"
+author: "ziroai"
+
+branding:
+  icon: "crosshair"
+  color: "red"
+
+inputs:
+  target:
+    description: "Target domain, URL or host:port (comma-separated). Authorised testing only."
+    required: true
+  profile:
+    description: "Scan profile: quick | balanced | full | deep"
+    required: false
+    default: "balanced"
+  phase:
+    description: "Explicit phase list (overrides profile), e.g. 'subdomain,validation,vulnscan'"
+    required: false
+    default: ""
+  scope-file:
+    description: "Path to a file with in-scope entries (one per line)"
+    required: false
+    default: ""
+  out-of-scope-file:
+    description: "Path to a file with excluded entries"
+    required: false
+    default: ""
+  output-dir:
+    description: "Base output directory"
+    required: false
+    default: "output"
+  rate-limit:
+    description: "HTTP requests per second"
+    required: false
+    default: ""
+  fail-on:
+    description: "Fail the job when findings at or above this severity exist: critical | high | medium | low | none"
+    required: false
+    default: "none"
+  upload-sarif:
+    description: "Upload results.sarif to GitHub code scanning"
+    required: false
+    default: "true"
+  args:
+    description: "Extra arguments passed to `synchunt` verbatim"
+    required: false
+    default: ""
+
+outputs:
+  findings:
+    description: "Total number of findings"
+    value: ${{ steps.summary.outputs.findings }}
+  critical:
+    description: "Number of critical findings"
+    value: ${{ steps.summary.outputs.critical }}
+  high:
+    description: "Number of high findings"
+    value: ${{ steps.summary.outputs.high }}
+  report-dir:
+    description: "Directory of the newest run (reports live in <report-dir>/reports)"
+    value: ${{ steps.summary.outputs.report_dir }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install SyncHunt
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r "${{ github.action_path }}/requirements.txt"
+        pip install -e "${{ github.action_path }}"
+
+    - name: Run scan
+      id: scan
+      shell: bash
+      run: |
+        set -o pipefail
+        ARGS=( -d "${{ inputs.target }}" --output-dir "${{ inputs.output-dir }}" --quiet )
+        if [ -n "${{ inputs.phase }}" ]; then
+          ARGS+=( --phase "${{ inputs.phase }}" )
+        else
+          ARGS+=( --profile "${{ inputs.profile }}" )
+        fi
+        [ -n "${{ inputs.scope-file }}" ] && ARGS+=( --scope-file "${{ inputs.scope-file }}" )
+        [ -n "${{ inputs.out-of-scope-file }}" ] && ARGS+=( --out-of-scope-file "${{ inputs.out-of-scope-file }}" )
+        [ -n "${{ inputs.rate-limit }}" ] && ARGS+=( --rate-limit "${{ inputs.rate-limit }}" )
+        ARGS+=( --json-report synchunt-summary.json )
+        echo "synchunt ${ARGS[*]}"
+        synchunt "${ARGS[@]}" || true
+        ${{ inputs.args }}
+
+    - name: Read summary
+      id: summary
+      shell: bash
+      run: |
+        python - <<'PY'
+        import glob, json, os
+        path = "synchunt-summary.json"
+        data = json.load(open(path)) if os.path.exists(path) else {"targets": []}
+        targets = data.get("targets") or []
+        findings = sum(t.get("findings", 0) for t in targets)
+        severity = {}
+        for t in targets:
+            for key, value in (t.get("severity") or {}).items():
+                severity[key] = severity.get(key, 0) + value
+        report_dir = ""
+        runs = sorted(glob.glob("**/reports/report.html", recursive=True))
+        if runs:
+            report_dir = os.path.dirname(os.path.dirname(runs[-1]))
+        outputs = {
+            "findings": str(findings),
+            "critical": str(severity.get("critical", 0)),
+            "high": str(severity.get("high", 0)),
+            "report_dir": report_dir,
+        }
+        with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+            for key, value in outputs.items():
+                fh.write(f"{key}={value}\n")
+        print(json.dumps(outputs, indent=2))
+        PY
+
+    - name: Upload SARIF to code scanning
+      if: ${{ inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      continue-on-error: true
+      with:
+        sarif_file: ${{ inputs.output-dir }}
+
+    - name: Upload reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: synchunt-reports
+        path: |
+          ${{ inputs.output-dir }}/**/reports/*
+          synchunt-summary.json
+        if-no-files-found: warn
+
+    - name: Enforce severity gate
+      if: ${{ inputs.fail-on != 'none' }}
+      shell: bash
+      run: |
+        python - <<'PY'
+        import json, os, sys
+        order = ["info", "low", "medium", "high", "critical"]
+        threshold = "${{ inputs.fail-on }}".lower()
+        if threshold not in order:
+            print(f"unknown fail-on value: {threshold}")
+            sys.exit(1)
+        data = json.load(open("synchunt-summary.json"))
+        severity = {}
+        for target in data.get("targets") or []:
+            for key, value in (target.get("severity") or {}).items():
+                severity[key] = severity.get(key, 0) + value
+        limit = order.index(threshold)
+        offending = {k: v for k, v in severity.items() if v and order.index(k) >= limit}
+        if offending:
+            print(f"::error::SyncHunt found {offending} at or above '{threshold}'")
+            sys.exit(1)
+        print(f"no findings at or above '{threshold}'")
+        PY

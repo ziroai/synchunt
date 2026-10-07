@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Byte-compile everything
+        run: python -m compileall -q core modules reports main.py
+
+      - name: Static checks (pyflakes)
+        run: python -m pyflakes core modules reports main.py tests
+
+      - name: Unit + integration tests
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests -q 2>&1 | tee pytest-output.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            tail -n 20 pytest-output.log | sed 's/^/::error::/'
+          fi
+          exit "$status"
+
+      - name: Install as a package and smoke the console script
+        run: |
+          pip install -e .
+          synchunt --version
+          synchunt --list-phases
+          synchunt --check-deps || true
+          # the helper CLI ships in the same package
+          printf 'https://a.test/x?id=1\nhttps://a.test/x?id=1\n' | synchunt-tools dedupe --count
+          synchunt-tools gf --list
+          printf '5f4dcc3b5aa765d61d8327deb882cf99\n' | synchunt-tools hash-id
+
+      - name: CLI smoke test
+        run: |
+          python main.py --list-phases
+          python main.py --check-deps || true
+          python main.py -d example.com --dry-run --output-dir /tmp/synchunt-ci
+
+      - name: Parallel verification sweep
+        run: ./scripts/check.sh --quick
+
+  platforms:
+    name: platform (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Unit + integration tests
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests -q 2>&1 | tee pytest-output.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            tail -n 20 pytest-output.log | sed 's/^/::error::/'
+          fi
+          exit "$status"
+
+      - name: Cross-platform verification sweep
+        run: python scripts/check.py --quick --jobs 2
+
+      - name: Console, language and ASCII-fallback smoke test
+        env:
+          SYNCHUNT_ASCII: "1"
+        run: |
+          python -c "from core.platform_compat import platform_summary; print(platform_summary())"
+          synchunt --list-languages
+          synchunt --version
+
+  assets:
+    name: action + container assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install YAML parser
+        run: python -m pip install --quiet "pyyaml>=6.0"
+      - name: Validate action.yml
+        run: |
+          python - <<'PY'
+          import yaml
+          action = yaml.safe_load(open("action.yml"))
+          assert action["runs"]["using"] == "composite", action["runs"]["using"]
+          for key in ("target", "profile", "fail-on", "upload-sarif"):
+              assert key in action["inputs"], key
+          assert {"findings", "critical", "high", "report-dir"} <= set(action["outputs"])
+          print(f"action.yml ok: {len(action['runs']['steps'])} steps")
+          PY
+      - name: Validate Dockerfile structure
+        run: |
+          python - <<'PY'
+          import re
+          src = open("Dockerfile").read()
+          assert 'ENTRYPOINT ["synchunt"]' in src
+          assert "USER hunter" in src
+          stages = re.findall(r"^FROM (\S+) AS (\w+)", src, re.M)
+          assert ("python:3.12-slim", "base") in stages, stages
+          assert ("base", "slim") in stages and ("base", "full") in stages
+          print("Dockerfile ok:", stages)
+          PY
+      - name: Build slim image
+        run: docker build --target slim -t synchunt:slim .

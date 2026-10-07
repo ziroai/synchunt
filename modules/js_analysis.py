@@ -1,230 +1,420 @@
 """
-BugHuntRecon - JavaScript Analysis Module
-Integrates: LinkFinder, SecretFinder, custom regex patterns
+SyncHunt - JavaScript Analysis
+Downloads in-scope JS bundles and extracts endpoints, source maps and
+secrets. Secret detection uses the shared pattern engine with entropy
+filtering, and every match is redacted before it is written to disk.
 """
 
-import os
-import re
-import time
-import requests
-import urllib3
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from core.utils import read_file_lines, write_file_lines, save_json
+from __future__ import annotations
 
-# Suppress InsecureRequestWarning from verify=False JS downloads
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List
+
+from core.models import Asset, Finding
+from core.secrets import build_patterns, scan_text
+from core.utils import (
+    load_json,
+    read_file_lines,
+    read_json_lines,
+    save_json,
+    write_file_lines,
+)
 
 
 class JSAnalyzer:
-    """Analyze JavaScript files for endpoints, secrets, and sensitive data."""
+    """Analyse JavaScript files for endpoints and secrets."""
 
-    def __init__(self, config, runner, logger, output_dir, js_files_list):
-        self.config = config
-        self.runner = runner
-        self.logger = logger
-        self.output_dir = os.path.join(output_dir, "js_analysis")
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self.config = ctx.config
+        self.runner = ctx.runner
+        self.logger = ctx.logger
+        self.output_dir = ctx.path("js_analysis")
         self.files_dir = os.path.join(self.output_dir, "files")
-        self.js_files_list = js_files_list
-        self.endpoints = set()
-        self.secrets = []
+        self.js_files_list = ctx.resolve_file("js_files", "content_discovery", "js_files.txt")
+        self.endpoints: set = set()
+        self.secrets: List[Dict] = []
+        self.findings: List[Finding] = []
 
-        for d in [self.output_dir, self.files_dir]:
-            os.makedirs(d, exist_ok=True)
+        for directory in (self.output_dir, self.files_dir):
+            os.makedirs(directory, exist_ok=True)
 
-    def run_all(self):
-        """Run all JS analysis tools."""
-        self.logger.phase_banner("JAVASCRIPT ANALYSIS", 6)
-        start_time = time.time()
+        # Custom patterns supplement (not replace) the built-in library.
+        self.patterns = build_patterns(
+            self.config.get("js_analysis.custom_regex.patterns", [])
+        )
+        self.max_download = self.config.get_int("js_analysis.max_files", 200)
+        self.check_sourcemaps = self.config.get_bool("js_analysis.check_sourcemaps", True)
+
+    # ------------------------------------------------------------------
+    def run_all(self) -> str:
+        self.logger.phase_banner("JAVASCRIPT ANALYSIS", 10)
+        started = time.time()
 
         js_urls = read_file_lines(self.js_files_list)
         if not js_urls:
-            self.logger.warning("No JavaScript files to analyze!")
-            return None
+            self.logger.warning("No JavaScript files to analyse")
+            return self.output_dir
 
-        self.logger.info(f"Analyzing {len(js_urls)} JavaScript files...")
+        scoped = self.ctx.scope.filter(js_urls) if self.ctx.scope else js_urls
+        if len(scoped) != len(js_urls):
+            self.logger.skip(f"{len(js_urls) - len(scoped)} out-of-scope JS file(s) dropped")
 
-        # Download JS files first
-        self._download_js_files(js_urls[:200])  # Limit to 200 files
+        self.logger.info(f"Analysing {len(scoped)} JavaScript file(s)...")
+        downloaded = self._download_js_files(scoped[: self.max_download])
 
-        # LinkFinder
-        if self.config.is_tool_enabled('js_analysis', 'linkfinder'):
-            try:
-                self.run_linkfinder(js_urls)
-            except Exception as e:
-                self.logger.error(f"LinkFinder failed: {str(e)}")
+        if self.config.is_tool_enabled("js_analysis", "linkfinder"):
+            self.run_linkfinder(scoped[:100])
+        if self.config.is_tool_enabled("js_analysis", "secretfinder"):
+            self.run_secretfinder(scoped[:100])
+        if self.config.is_tool_enabled("js_analysis", "jsluice"):
+            self.run_jsluice()
+        if self.config.is_tool_enabled("js_analysis", "trufflehog"):
+            self.run_trufflehog()
+        if self.config.is_tool_enabled("js_analysis", "gitleaks"):
+            self.run_gitleaks()
 
-        # SecretFinder
-        if self.config.is_tool_enabled('js_analysis', 'secretfinder'):
-            try:
-                self.run_secretfinder(js_urls)
-            except Exception as e:
-                self.logger.error(f"SecretFinder failed: {str(e)}")
+        self.run_custom_regex_scan()
 
-        # Custom regex scanning
-        if self.config.get('js_analysis.custom_regex.enabled', True):
-            try:
-                self.run_custom_regex_scan()
-            except Exception as e:
-                self.logger.error(f"Custom regex scan failed: {str(e)}")
-
-        duration = time.time() - start_time
-        self.logger.result(
-            f"JS Analysis Complete: {len(self.endpoints)} endpoints, "
-            f"{len(self.secrets)} secrets found in {duration:.1f}s"
+        self._write_outputs()
+        self.ctx.record_assets(
+            [
+                Asset(kind="js_file", value=url, source="js_analysis")
+                for url in scoped[:500]
+            ]
+            + [
+                Asset(kind="js_endpoint", value=e, source="js_analysis")
+                for e in sorted(self.endpoints)[:500]
+            ]
         )
+        self.ctx.record_findings(self.findings)
 
+        self.logger.result(
+            f"JS Analysis Complete: {len(self.endpoints)} endpoint(s), "
+            f"{len(self.secrets)} potential secret(s) from {downloaded} file(s) "
+            f"in {time.time() - started:.1f}s"
+        )
         return self.output_dir
 
-    def _download_js_files(self, js_urls):
-        """Download JS files for local analysis."""
-        self.logger.info(f"Downloading {len(js_urls)} JS files...")
+    # ------------------------------------------------------------------
+    def _download_js_files(self, js_urls: List[str]) -> int:
+        """Download JS bodies for offline regex analysis."""
+        from core.net import http_request
+        from core.utils import sanitize_filename, short_hash
 
-        def download_file(url):
-            try:
-                resp = requests.get(url, timeout=15, verify=False)
-                if resp.status_code == 200 and resp.text:
-                    # Create filename from URL
-                    safe_name = url.replace('https://', '').replace('http://', '')
-                    safe_name = re.sub(r'[^\w\-.]', '_', safe_name)[:100]
-                    if not safe_name.endswith('.js'):
-                        safe_name += '.js'
-                    filepath = os.path.join(self.files_dir, safe_name)
-                    with open(filepath, 'w', errors='ignore') as f:
-                        f.write(resp.text)
-                    return True
-            except Exception:
-                pass
-            return False
+        def download(url: str) -> bool:
+            result = http_request(
+                self.ctx.session, "GET", url, limiter=self.ctx.limiter,
+                timeout=20, max_bytes=2 * 1024 * 1024,
+            )
+            if result.status != 200 or not result.text:
+                return False
+            name = sanitize_filename(url.replace("https://", "").replace("http://", ""), 90)
+            if not name.endswith(".js"):
+                name += ".js"
+            path = os.path.join(self.files_dir, f"{short_hash(url, length=6)}_{name}")
+            with open(path, "w", errors="ignore", encoding="utf-8") as fh:
+                fh.write(result.text)
+            if self.check_sourcemaps and "sourceMappingURL=" in result.text:
+                self._check_sourcemap(url, result.text)
+            return True
 
         downloaded = 0
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            futures = {executor.submit(download_file, url): url for url in js_urls}
+        with ThreadPoolExecutor(max_workers=min(self.ctx.threads(), 20)) as executor:
+            futures = {executor.submit(download, url): url for url in js_urls}
             for future in as_completed(futures):
                 if future.result():
                     downloaded += 1
+        self.logger.info(f"Downloaded {downloaded}/{len(js_urls)} JS file(s)")
+        return downloaded
 
-        self.logger.info(f"Downloaded {downloaded}/{len(js_urls)} JS files")
+    def _check_sourcemap(self, js_url: str, body: str) -> None:
+        """Exposed source maps leak original source code."""
+        marker = "sourceMappingURL="
+        index = body.find(marker)
+        map_ref = body[index + len(marker):].splitlines()[0].strip()
+        if not map_ref:
+            return
+        from urllib.parse import urljoin
 
-    def run_linkfinder(self, js_urls):
-        """Run LinkFinder on JS files to discover endpoints."""
-        self.logger.info("Running LinkFinder for endpoint discovery...")
+        map_url = urljoin(js_url, map_ref)
+        from core.net import http_request
 
+        result = http_request(
+            self.ctx.session, "GET", map_url, limiter=self.ctx.limiter,
+            timeout=15, max_bytes=65536,
+        )
+        if result.status == 200 and '"sources"' in result.text:
+            self.findings.append(
+                Finding(
+                    category="exposure",
+                    title="JavaScript source map exposed",
+                    severity="low",
+                    target=self.ctx.target,
+                    url=map_url,
+                    evidence=f"Source map readable at {map_url}",
+                    source="js_analysis",
+                    confidence="high",
+                    tags=["sourcemap", "exposure"],
+                )
+            )
+            self.logger.found(f"Source map exposed: {map_url}")
+
+    # ------------------------------------------------------------------
+    def run_linkfinder(self, js_urls: List[str]) -> None:
+        if self.runner.require("linkfinder"):
+            return
+        self.logger.info("Running LinkFinder...")
         endpoints_file = os.path.join(self.output_dir, "endpoints", "linkfinder.txt")
         os.makedirs(os.path.dirname(endpoints_file), exist_ok=True)
-
-        all_endpoints = set()
-
-        for js_url in js_urls[:100]:  # Limit
-            cmd = f"linkfinder -i {js_url} -o cli"
-
+        found = set()
+        for js_url in js_urls:
             result = self.runner.run(
-                cmd,
-                tool_name="linkfinder",
-                timeout=30
+                ["linkfinder", "-i", js_url, "-o", "cli"],
+                tool_name="linkfinder", timeout=45,
+            )
+            for line in (result.get("stdout") or "").splitlines():
+                line = line.strip()
+                if line and not line.startswith("[") and "/" in line:
+                    found.add(line)
+        write_file_lines(endpoints_file, sorted(found))
+        self.endpoints.update(found)
+        self.logger.found(f"LinkFinder: {len(found)} endpoint(s)")
+
+    # ------------------------------------------------------------------
+    def run_jsluice(self) -> None:
+        """jsluice: extract URLs from the downloaded JS corpus (JSON lines)."""
+        if self.runner.require("jsluice"):
+            return
+        raw_dir = os.path.join(self.output_dir, "endpoints")
+        os.makedirs(raw_dir, exist_ok=True)
+        output_file = os.path.join(raw_dir, "jsluice.jsonl")
+
+        self.logger.info("Running jsluice endpoint extraction...")
+        with open(output_file, "w", encoding="utf-8") as fh:
+            for name in sorted(os.listdir(self.files_dir)):
+                path = os.path.join(self.files_dir, name)
+                if not os.path.isfile(path):
+                    continue
+                result = self.runner.run(
+                    ["jsluice", "urls", path], tool_name="jsluice", timeout=300
+                )
+                for line in (result.get("stdout") or "").splitlines():
+                    if line.strip().startswith("{"):
+                        fh.write(line + "\n")
+
+        for record in read_json_lines(output_file):
+            url = record.get("url") if isinstance(record, dict) else None
+            if url:
+                self.endpoints.add(str(url))
+
+    def run_trufflehog(self) -> None:
+        """trufflehog: verified-secret scan of the downloaded JS corpus."""
+        if self.runner.require("trufflehog"):
+            return
+        raw_dir = os.path.join(self.output_dir, "secrets")
+        os.makedirs(raw_dir, exist_ok=True)
+        output_file = os.path.join(raw_dir, "trufflehog.jsonl")
+
+        self.logger.info("Running trufflehog on the JS corpus...")
+        result = self.runner.run(
+            ["trufflehog", "filesystem", self.files_dir, "--json",
+             "--no-verification", "--log-level", "-1"],
+            tool_name="trufflehog", timeout=900,
+        )
+        with open(output_file, "w", encoding="utf-8") as fh:
+            for line in (result.get("stdout") or "").splitlines():
+                if line.strip().startswith("{"):
+                    fh.write(line + "\n")
+
+        for record in read_json_lines(output_file):
+            if not isinstance(record, dict):
+                continue
+            detector = record.get("DetectorName") or record.get("detector_name") or "secret"
+            raw = str(record.get("Raw") or record.get("raw") or "")
+            location = ""
+            metadata = record.get("SourceMetadata") or {}
+            data = (metadata.get("Data") or {}) if isinstance(metadata, dict) else {}
+            filesystem = (data.get("Filesystem") or {}) if isinstance(data, dict) else {}
+            location = str(filesystem.get("file") or "")
+            self._record_tool_secret(
+                tool="trufflehog", name=str(detector), raw=raw, location=location,
+                verified=bool(record.get("Verified")),
             )
 
-            if result['success'] and result['stdout']:
-                endpoints = [
-                    l.strip() for l in result['stdout'].split('\n')
-                    if l.strip() and not l.startswith('[')
-                ]
-                all_endpoints.update(endpoints)
+    def run_gitleaks(self) -> None:
+        """gitleaks: secret scan of the downloaded JS corpus."""
+        if self.runner.require("gitleaks"):
+            return
+        raw_dir = os.path.join(self.output_dir, "secrets")
+        os.makedirs(raw_dir, exist_ok=True)
+        output_file = os.path.join(raw_dir, "gitleaks.json")
 
-        write_file_lines(endpoints_file, list(all_endpoints))
-        self.endpoints.update(all_endpoints)
-        self.logger.found(f"LinkFinder: {len(all_endpoints)} endpoints discovered")
+        self.logger.info("Running gitleaks on the JS corpus...")
+        self.runner.run(
+            ["gitleaks", "detect", "--source", self.files_dir, "--no-banner",
+             "--redact", "--report-format", "json", "--report-path", output_file],
+            tool_name="gitleaks", timeout=600,
+        )
+        data = load_json(output_file, [])
+        for record in data if isinstance(data, list) else []:
+            if not isinstance(record, dict):
+                continue
+            self._record_tool_secret(
+                tool="gitleaks",
+                name=str(record.get("RuleID") or "secret"),
+                raw=str(record.get("Secret") or ""),
+                location=str(record.get("File") or ""),
+                verified=False,
+            )
 
-    def run_secretfinder(self, js_urls):
-        """Run SecretFinder on JS files to find sensitive data."""
-        self.logger.info("Running SecretFinder for secret detection...")
+    def _record_tool_secret(self, tool: str, name: str, raw: str, location: str,
+                            verified: bool) -> None:
+        """Store a tool-reported secret - always redacted before it is written."""
+        from core.secrets import redact
 
+        redacted = redact(raw) if raw else "(redacted)"
+        entry = {
+            "type": name,
+            "severity": "high" if verified else "medium",
+            "confidence": "high" if verified else "medium",
+            "location": location,
+            "value": redacted,
+            "source": tool,
+            "verified": verified,
+            "entropy": 0.0,
+        }
+        self.secrets.append(entry)
+        self.findings.append(
+            Finding(
+                category="secrets",
+                title=f"Secret in JavaScript ({tool}): {name}",
+                severity=entry["severity"],
+                target=self.ctx.target,
+                url=location or self.ctx.target,
+                evidence=f"{tool} [{name}] {redacted}"
+                         + (" (verified)" if verified else ""),
+                source=tool,
+                confidence=entry["confidence"],
+                tags=["secrets", "javascript", tool],
+            )
+        )
+        self.logger.vuln(f"Secret [{name}] via {tool} in {location}: {redacted}")
+
+    def run_secretfinder(self, js_urls: List[str]) -> None:
+        if self.runner.require("secretfinder"):
+            return
+        self.logger.info("Running SecretFinder...")
         secrets_file = os.path.join(self.output_dir, "secrets", "secretfinder.txt")
         os.makedirs(os.path.dirname(secrets_file), exist_ok=True)
-
-        all_secrets = []
-
-        for js_url in js_urls[:100]:
-            cmd = f"secretfinder -i {js_url} -o cli"
-
+        found = []
+        for js_url in js_urls:
             result = self.runner.run(
-                cmd,
-                tool_name="secretfinder",
-                timeout=30
+                ["secretfinder", "-i", js_url, "-o", "cli"],
+                tool_name="secretfinder", timeout=45,
             )
+            for line in (result.get("stdout") or "").splitlines():
+                if line.strip():
+                    found.append(f"[{js_url}] {line.strip()}")
+        write_file_lines(secrets_file, found)
+        self.logger.found(f"SecretFinder: {len(found)} potential hit(s)")
 
-            if result['success'] and result['stdout']:
-                secrets = [
-                    l.strip() for l in result['stdout'].split('\n')
-                    if l.strip()
-                ]
-                for secret in secrets:
-                    all_secrets.append(f"[{js_url}] {secret}")
-
-        write_file_lines(secrets_file, all_secrets)
-        self.secrets.extend(all_secrets)
-        self.logger.found(f"SecretFinder: {len(all_secrets)} potential secrets found")
-
-    def run_custom_regex_scan(self):
-        """Scan downloaded JS files with custom regex patterns."""
-        self.logger.info("Running custom regex scan on JS files...")
-
-        patterns_config = self.config.get('js_analysis.custom_regex.patterns', [])
-        if not patterns_config:
-            return
-
-        # Compile regex patterns
-        compiled_patterns = []
-        for p in patterns_config:
-            try:
-                compiled_patterns.append({
-                    'name': p['name'],
-                    'regex': re.compile(p['regex'], re.IGNORECASE)
-                })
-            except re.error as e:
-                self.logger.warning(f"Invalid regex pattern '{p['name']}': {e}")
-
+    # ------------------------------------------------------------------
+    def run_custom_regex_scan(self) -> None:
+        """Entropy-filtered regex scan over the downloaded JS corpus."""
+        self.logger.info("Scanning JS corpus for secrets (entropy-filtered)...")
         secrets_file = os.path.join(self.output_dir, "secrets", "custom_regex.txt")
         secrets_json = os.path.join(self.output_dir, "secrets", "custom_regex.json")
         os.makedirs(os.path.dirname(secrets_file), exist_ok=True)
 
-        findings = []
-        findings_text = []
+        matches_by_fingerprint: Dict[str, Dict] = {}
+        endpoint_patterns = set()
 
-        # Scan all downloaded JS files
-        for filename in os.listdir(self.files_dir):
-            filepath = os.path.join(self.files_dir, filename)
-            if not os.path.isfile(filepath):
+        for name in sorted(os.listdir(self.files_dir)):
+            path = os.path.join(self.files_dir, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", errors="ignore", encoding="utf-8") as fh:
+                    content = fh.read()
+            except OSError as exc:
+                self.logger.debug(f"could not read {name}: {exc}")
                 continue
 
-            try:
-                with open(filepath, 'r', errors='ignore') as f:
-                    content = f.read()
+            for match in scan_text(content, patterns=self.patterns, source="javascript",
+                                   location=name):
+                entry = match.to_dict()
+                matches_by_fingerprint.setdefault(match.fingerprint(), entry)
+                self.findings.append(
+                    Finding(
+                        category="secrets",
+                        title=f"Secret in JavaScript: {match.name}",
+                        severity=match.severity,
+                        target=self.ctx.target,
+                        url=name,
+                        evidence=f"{match.name} -> {entry['value']} (entropy {entry['entropy']})",
+                        source="js_analysis",
+                        confidence=match.confidence,
+                        tags=["secrets", "javascript"],
+                    )
+                )
+                self.logger.vuln(f"Secret [{match.name}] in {name}: {entry['value']}")
 
-                for pattern in compiled_patterns:
-                    matches = pattern['regex'].findall(content)
-                    for match in matches:
-                        finding = {
-                            'file': filename,
-                            'type': pattern['name'],
-                            'match': match if isinstance(match, str) else match[0],
-                            'severity': 'HIGH'
-                        }
-                        findings.append(finding)
-                        findings_text.append(
-                            f"[{pattern['name']}] {filename}: {match}"
-                        )
-                        self.logger.vuln(
-                            f"Secret Found [{pattern['name']}] in {filename}: "
-                            f"{str(match)[:80]}..."
-                        )
+            endpoint_patterns.update(_extract_endpoints(content))
 
-            except Exception as e:
-                self.logger.debug(f"Error scanning {filename}: {e}")
-
-        write_file_lines(secrets_file, findings_text)
-        save_json(findings, secrets_json)
-
-        self.secrets.extend(findings_text)
-        self.logger.found(
-            f"Custom Regex: {len(findings)} potential secrets found"
+        secrets = sorted(matches_by_fingerprint.values(), key=lambda item: item["type"])
+        self.secrets.extend(secrets)
+        write_file_lines(
+            secrets_file,
+            [f"[{s['type']}|{s['severity']}] {s['location']}: {s['value']}" for s in secrets],
         )
+        save_json(secrets, secrets_json)
+
+        self.endpoints.update(endpoint_patterns)
+        endpoints_file = os.path.join(self.output_dir, "endpoints", "regex_endpoints.txt")
+        write_file_lines(endpoints_file, sorted(endpoint_patterns))
+        if endpoint_patterns:
+            self.logger.found(f"Endpoint extraction: {len(endpoint_patterns)} path(s)")
+
+    # ------------------------------------------------------------------
+    def _write_outputs(self) -> None:
+        endpoints_file = os.path.join(self.output_dir, "endpoints", "all_endpoints.txt")
+        write_file_lines(endpoints_file, sorted(self.endpoints))
+        self.ctx.set_file("js_endpoints", endpoints_file)
+        save_json(
+            {
+                "endpoints": len(self.endpoints),
+                "secrets": len(self.secrets),
+                "high_severity_secrets": sum(
+                    1 for s in self.secrets if s.get("severity") in ("critical", "high")
+                ),
+            },
+            os.path.join(self.output_dir, "summary.json"),
+        )
+
+
+ENDPOINT_RE = None
+
+
+def _extract_endpoints(content: str) -> set:
+    """Pull interesting paths/URLs out of a JS bundle."""
+    import re
+
+    global ENDPOINT_RE
+    if ENDPOINT_RE is None:
+        ENDPOINT_RE = re.compile(
+            r"""["'`]((?:https?://[^"'`\s]{4,200})|(?:/[A-Za-z0-9_\-./]{2,120}))["'`]"""
+        )
+    found = set()
+    for match in ENDPOINT_RE.finditer(content):
+        value = match.group(1)
+        if value.startswith("//") or value.endswith((".png", ".jpg", ".gif", ".svg", ".css")):
+            continue
+        if value.count("/") < 1:
+            continue
+        found.add(value)
+        if len(found) > 5000:  # guard against minified noise
+            break
+    return found

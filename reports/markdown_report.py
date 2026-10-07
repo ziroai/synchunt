@@ -1,127 +1,215 @@
 """
-BugHuntRecon - Markdown Report Generator
+SyncHunt - Markdown Report Generator
 """
+
+from __future__ import annotations
 
 import os
 from datetime import datetime
-from core.utils import read_file_lines
+from typing import Dict, List, Optional
+
+from core.i18n import t
+from core.models import Finding
+from core.utils import fenced_block, format_duration, load_json, read_file_lines
 
 
 class MarkdownReportGenerator:
-    """Generate Markdown reports."""
+    """Generate a Markdown report suitable for tickets and PR comments."""
 
-    def __init__(self, output_dir, target, scan_start, scan_end):
+    def __init__(self, output_dir, target, scan_start, scan_end,
+                 database=None, scan_id=None, findings: Optional[List[Finding]] = None,
+                 history: Optional[Dict] = None):
         self.output_dir = output_dir
         self.target = target
         self.scan_start = scan_start
         self.scan_end = scan_end
+        self.database = database
+        self.scan_id = scan_id
+        self._findings = findings
+        self.history = history or {}
         self.report_dir = os.path.join(output_dir, "reports")
         os.makedirs(self.report_dir, exist_ok=True)
 
-    def generate(self):
-        """Generate the Markdown report."""
+    # ------------------------------------------------------------------
+    def _findings_list(self) -> List[Dict]:
+        if self._findings:
+            return [
+                f.to_dict() | {"priority": f.extra.get("priority", "")}
+                for f in self._findings
+            ]
+        if self.database is not None and self.scan_id is not None:
+            try:
+                rows = self.database.findings(self.scan_id)
+                if rows:
+                    return [
+                        f.to_dict() | {"priority": f.extra.get("priority", "")}
+                        for f in rows
+                    ]
+            except Exception:  # pragma: no cover - defensive
+                pass
+        data = load_json(
+            os.path.join(self.output_dir, "findings_prioritized", "findings.json"), []
+        )
+        return data if isinstance(data, list) else []
+
+    def generate(self) -> str:
         report_path = os.path.join(self.report_dir, "report.md")
+        findings = self._findings_list()
 
-        lines = []
-        lines.append(f"# 🔥 BugHuntRecon Report\n")
-        lines.append(f"**Target:** `{self.target}`\n")
-        lines.append(f"**Scan Start:** {self.scan_start}\n")
-        lines.append(f"**Scan End:** {self.scan_end}\n")
-        lines.append(f"**Duration:** {self.scan_end - self.scan_start if self.scan_end and self.scan_start else 'N/A'}\n")
-        lines.append(f"---\n")
+        duration = "N/A"
+        if self.scan_end and self.scan_start:
+            duration = format_duration((self.scan_end - self.scan_start).total_seconds())
 
-        # Statistics
-        lines.append(f"## 📊 Summary Statistics\n")
+        lines: List[str] = [
+            f"# 🔎 SyncHunt - {t('report.title')}",
+            "",
+            f"**Target:** `{self.target}`  ",
+            f"**Scan start:** {self.scan_start}  ",
+            f"**Duration:** {duration}  ",
+            f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "> Findings are heuristic and require manual verification. "
+            "Only test systems you are authorised to test.",
+            "",
+            f"## 📊 {t('summary.title')}",
+            "",
+        ]
 
-        stats = {
-            'Subdomains': ('subdomains/all_subdomains.txt', 0),
-            'Live Hosts': ('dns/live_hosts.txt', 0),
-            'Open Ports': ('ports/all_ports.txt', 0),
-            'URLs': ('content_discovery/all_urls.txt', 0),
-            'JS Files': ('content_discovery/js_files.txt', 0),
-        }
+        severity_counts: Dict[str, int] = {}
+        priority_counts: Dict[str, int] = {}
+        for finding in findings:
+            key = (finding.get("severity") or "info").lower()
+            severity_counts[key] = severity_counts.get(key, 0) + 1
+            prio = finding.get("priority") or "—"
+            priority_counts[prio] = priority_counts.get(prio, 0) + 1
 
         lines.append("| Metric | Count |")
         lines.append("|--------|-------|")
-
-        for label, (filepath, _) in stats.items():
-            full_path = os.path.join(self.output_dir, filepath)
-            count = len(read_file_lines(full_path)) if os.path.exists(full_path) else 0
-            lines.append(f"| {label} | {count} |")
-
+        lines.append(f"| Total findings | {len(findings)} |")
+        for level in ("critical", "high", "medium", "low", "info"):
+            lines.append(f"| {level.title()} | {severity_counts.get(level, 0)} |")
+        for prio in ("P1", "P2", "P3", "P4"):
+            lines.append(f"| Priority {prio} | {priority_counts.get(prio, 0)} |")
         lines.append("")
 
-        # Vulnerabilities
-        lines.append(f"## 🚨 Vulnerabilities\n")
-        vuln_dir = os.path.join(self.output_dir, "vulnerabilities")
-        if os.path.exists(vuln_dir):
-            vuln_count = 0
-            for root, dirs, files in os.walk(vuln_dir):
-                for f in files:
-                    if f.endswith('.txt'):
-                        vulns = read_file_lines(os.path.join(root, f))
-                        vuln_count += len(vulns)
-                        if vulns:
-                            rel_path = os.path.relpath(
-                                os.path.join(root, f), self.output_dir
-                            )
-                            lines.append(f"### {rel_path}\n")
-                            lines.append("```")
-                            for v in vulns[:50]:
-                                lines.append(v)
-                            if len(vulns) > 50:
-                                lines.append(f"... and {len(vulns) - 50} more")
-                            lines.append("```\n")
+        history = self.history
+        if history.get("previous_run"):
+            counts = history.get("counts") or {}
+            lines += [
+                f"## 🕓 {t('report.history')}",
+                "",
+                f"Compared with `{os.path.basename(str(history['previous_run']))}`: "
+                f"**{counts.get('new', 0)} new**, **{counts.get('fixed', 0)} fixed**, "
+                f"**{counts.get('persisting', 0)} persisting**.",
+                "",
+            ]
+            new_findings = history.get("new") or []
+            if new_findings:
+                lines += [
+                    "| Severity | Title | Location |",
+                    "|----------|-------|----------|",
+                ]
+                for row in new_findings[:25]:
+                    title = str(row.get("title") or "").replace("|", "\\|")[:90]
+                    location = str(row.get("url") or "").replace("|", "\\|")[:70]
+                    lines.append(
+                        f"| {str(row.get('severity') or '').upper()} | {title} | {location} |"
+                    )
+                lines.append("")
+            fixed_findings = history.get("fixed") or []
+            if fixed_findings:
+                lines += [
+                    f"<details><summary>Fixed since last scan ({len(fixed_findings)})"
+                    "</summary>",
+                    "",
+                ]
+                for row in fixed_findings[:50]:
+                    title = str(row.get("title") or "").replace("|", "\\|")[:90]
+                    location = str(row.get("url") or "")
+                    lines.append(f"- ~~{title}~~ — {location}")
+                lines += ["", "</details>", ""]
 
-            lines.append(f"**Total Vulnerabilities: {vuln_count}**\n")
-        else:
-            lines.append("No vulnerabilities found.\n")
+        for label, path in (
+            ("Subdomains", ("subdomains", "all_subdomains.txt")),
+            ("Live hosts", ("dns", "live_hosts.txt")),
+            ("Open ports", ("ports", "all_ports.txt")),
+            ("URLs", ("content_discovery", "all_urls.txt")),
+            ("JS files", ("content_discovery", "js_files.txt")),
+            ("API endpoints", ("api_intelligence", "endpoints.txt")),
+            ("Public buckets", ("cloud_enum", "public_buckets.txt")),
+            ("Interesting paths", ("intel", "interesting_paths.txt")),
+        ):
+            full = os.path.join(self.output_dir, *path)
+            count = len(read_file_lines(full)) if os.path.exists(full) else 0
+            lines.append(f"| {label} | {count} |")
+        lines.append("")
 
-        # Secrets
-        lines.append(f"## 🔑 Secrets & Sensitive Data\n")
-        secrets_dir = os.path.join(self.output_dir, "js_analysis", "secrets")
-        if os.path.exists(secrets_dir):
-            for f in os.listdir(secrets_dir):
-                if f.endswith('.txt'):
-                    secrets = read_file_lines(os.path.join(secrets_dir, f))
-                    if secrets:
-                        lines.append(f"### {f}\n")
-                        lines.append("```")
-                        for s in secrets[:50]:
-                            lines.append(s)
-                        lines.append("```\n")
+        if findings:
+            lines += [
+                f"## 🎯 {t('report.findings')}",
+                "",
+                "| Priority | Score | Severity | Category | Title | Location |",
+                "|----------|-------|----------|----------|-------|----------|",
+            ]
+            for finding in findings[:120]:
+                title = str(finding.get("title") or "").replace("|", "\\|")[:90]
+                location = str(finding.get("url") or finding.get("target") or "")
+                location = location.replace("|", "\\|")[:70]
+                try:
+                    score = f"{float(finding.get('score') or 0):.2f}"
+                except (TypeError, ValueError):
+                    score = "0.00"
+                lines.append(
+                    f"| {finding.get('priority') or '—'} | {score} | "
+                    f"{finding.get('severity') or 'info'} | {finding.get('category') or ''} | "
+                    f"{title} | {location} |"
+                )
+            lines.append("")
 
-        # Subdomains
-        lines.append(f"## 🌐 Subdomains\n")
-        sub_file = os.path.join(self.output_dir, "subdomains", "all_subdomains.txt")
-        if os.path.exists(sub_file):
-            subs = read_file_lines(sub_file)
-            lines.append(f"Total: {len(subs)}\n")
-            lines.append("<details><summary>Click to expand</summary>\n")
-            lines.append("```")
-            for s in subs[:200]:
-                lines.append(s)
-            if len(subs) > 200:
-                lines.append(f"... and {len(subs) - 200} more")
-            lines.append("```")
-            lines.append("</details>\n")
+            lines.append(f"## 🔍 {t('report.findings')} - detail")
+            lines.append("")
+            for finding in findings[:20]:
+                lines.append(f"### {finding.get('title') or 'finding'}")
+                lines.append("")
+                lines.append(f"- **Severity / priority:** {finding.get('severity')} "
+                             f"({finding.get('priority') or '—'}, score {finding.get('score')})")
+                lines.append(f"- **Category:** {finding.get('category')}")
+                if finding.get("url"):
+                    lines.append(f"- **Location:** {finding.get('url')}")
+                if finding.get("source"):
+                    lines.append(f"- **Source phase:** {finding.get('source')}")
+                if finding.get("score_reasons"):
+                    lines.append(f"- **Why this score:** {finding.get('score_reasons')}")
+                if finding.get("evidence"):
+                    lines.append("")
+                    lines.append(fenced_block(str(finding["evidence"])[:800]))
+                lines.append("")
 
-        # Live Hosts
-        lines.append(f"## ✅ Live Hosts\n")
-        live_file = os.path.join(self.output_dir, "dns", "live_hosts.txt")
-        if os.path.exists(live_file):
-            hosts = read_file_lines(live_file)
-            lines.append(f"Total: {len(hosts)}\n")
-            lines.append("<details><summary>Click to expand</summary>\n")
-            lines.append("```")
-            for h in hosts[:200]:
-                lines.append(h)
-            lines.append("```")
-            lines.append("</details>\n")
+        for title, rel in (
+            ("🌐 Subdomains", ("subdomains", "all_subdomains.txt")),
+            ("✅ Live hosts", ("dns", "live_hosts.txt")),
+            ("🔓 Open ports", ("ports", "all_ports.txt")),
+        ):
+            full = os.path.join(self.output_dir, *rel)
+            items = read_file_lines(full) if os.path.exists(full) else []
+            lines.append(f"## {title} ({len(items)})")
+            lines.append("")
+            if items:
+                lines.append("<details><summary>Click to expand</summary>")
+                lines.append("")
+                lines.append(fenced_block("\n".join(items[:300])))
+                lines.append("")
+                lines.append("</details>")
+            else:
+                lines.append("_none_")
+            lines.append("")
 
-        lines.append(f"\n---\n*Generated by BugHuntRecon | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n")
+        lines.append("---")
+        lines.append(
+            f"*Generated by SyncHunt at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"
+        )
+        lines.append("")
 
-        with open(report_path, 'w') as f:
-            f.write('\n'.join(lines))
-
+        with open(report_path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
         return report_path

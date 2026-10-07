@@ -1,25 +1,31 @@
 # ============================================
-# BugHuntRecon - .gitignore
+# SyncHunt - .gitignore
 # ============================================
 
 # Scan output (can be huge + contains sensitive findings)
 output/
+*.db
 
-# Python cache
+# Python cache / test artifacts
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 .Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 venv/
 env/
 .venv/
 .env/
+.env
 
 # Environment / secrets files
-.env
 *.env
 secrets.yaml
 
@@ -55,3 +61,6 @@ wordlists/*.txt
 
 # Keep the wordlists folder structure
 !wordlists/.gitkeep
+
+# Parallel verification output (scripts/check.sh)
+.check/
