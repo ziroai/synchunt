@@ -1,34 +1,96 @@
 # ============================================
-# BugHuntRecon - Master Configuration
+# Synchunt - Advanced Recon Configuration
 # ============================================
 
 general:
+  profile: "balanced"             # quick | balanced | full | deep
   threads: 50
   timeout: 30
-  rate_limit: 150  # requests per second
-  user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+  rate_limit: 150
+  user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
   resolve_timeout: 5
   retry: 3
   verbose: true
   resume: true
+  auto_resume: true
   output_dir: "output"
-  scope_file: ""  # path to in-scope domains
-  out_of_scope_file: ""  # path to out-of-scope domains
+  scope_file: ""
+  out_of_scope_file: ""
+  dry_run: false
+  parallel_workers: 8
 
-# --- Subdomain Enumeration ---
+profiles:
+  quick:
+    phases:
+      - subdomain
+      - validation
+      - enrichment
+      - content
+      - report
+  balanced:
+    phases:
+      - subdomain
+      - validation
+      - enrichment
+      - portscan
+      - fingerprint
+      - github_recon
+      - content
+      - api_discovery
+      - jsanalysis
+      - cloud_enum
+      - vulnscan
+      - sensitive
+      - prioritize
+      - report
+  full:
+    phases:
+      - subdomain
+      - validation
+      - enrichment
+      - portscan
+      - fingerprint
+      - github_recon
+      - content
+      - api_discovery
+      - jsanalysis
+      - cloud_enum
+      - vulnscan
+      - sensitive
+      - screenshot
+      - prioritize
+      - report
+  deep:
+    phases:
+      - subdomain
+      - validation
+      - enrichment
+      - portscan
+      - fingerprint
+      - github_recon
+      - content
+      - api_discovery
+      - jsanalysis
+      - cloud_enum
+      - vulnscan
+      - sensitive
+      - screenshot
+      - prioritize
+      - report
+
 subdomain_enum:
   enabled: true
   subfinder:
     enabled: true
     threads: 30
     timeout: 30
-    sources: "all"  # or comma-separated sources
-    config: ""  # path to subfinder provider-config
+    sources: "all"
+    config: ""
   amass:
     enabled: true
-    timeout: 30  # minutes
+    timeout: 30
     passive: true
-    config: ""  # path to amass config
+    config: ""
   assetfinder:
     enabled: true
     subs_only: true
@@ -42,7 +104,7 @@ subdomain_enum:
     threads: 30
   puredns:
     enabled: true
-    wordlist: "wordlists/resolvers.txt"  # You should provide a large DNS wordlist for bruteforcing
+    wordlist: "wordlists/resolvers.txt"
     resolvers: "wordlists/resolvers.txt"
   gotator:
     enabled: true
@@ -50,7 +112,6 @@ subdomain_enum:
     depth: 1
     threads: 100
 
-# --- Subdomain Validation ---
 subdomain_validation:
   enabled: true
   httpx:
@@ -73,7 +134,14 @@ subdomain_validation:
     resolvers: "wordlists/resolvers.txt"
     rate: 500
 
-# --- Port Scanning ---
+asset_enrichment:
+  enabled: true
+  max_hosts: 150
+  probe_admin_paths: true
+  dns_cache: true
+  tech_hints: true
+  exposure_hints: true
+
 port_scanning:
   enabled: true
   naabu:
@@ -81,7 +149,7 @@ port_scanning:
     top_ports: 1000
     rate: 5000
     threads: 25
-    scan_type: "s"  # s=SYN, c=CONNECT
+    scan_type: "s"
   nmap:
     enabled: true
     scan_type: "-sV -sC"
@@ -92,18 +160,16 @@ port_scanning:
     rate: 10000
     ports: "1-65535"
 
-# --- Fingerprinting ---
 fingerprinting:
   enabled: true
   whatweb:
     enabled: true
-    aggression: 3  # 1-4
+    aggression: 3
   wafw00f:
     enabled: true
   webanalyze:
     enabled: true
 
-# --- Content Discovery ---
 content_discovery:
   enabled: true
   waybackurls:
@@ -146,7 +212,18 @@ content_discovery:
     wordlist: "wordlists/parameters.txt"
     threads: 20
 
-# --- JS Analysis ---
+api_introspection:
+  enabled: true
+  max_hosts: 100
+  common_paths:
+    - "/graphql"
+    - "/swagger.json"
+    - "/swagger-ui.html"
+    - "/openapi.json"
+    - "/api/docs"
+    - "/actuator"
+    - "/health"
+
 js_analysis:
   enabled: true
   linkfinder:
@@ -183,12 +260,23 @@ js_analysis:
       - name: "Heroku API Key"
         regex: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 
-# --- Vulnerability Scanning ---
+github_recon:
+  enabled: true
+  token: ""
+  max_repos: 10
+  max_issues: 10
+
+cloud_enum:
+  enabled: true
+  aws: true
+  azure: true
+  gcp: true
+
 vuln_scanning:
   enabled: true
   nuclei:
     enabled: true
-    templates: ""  # blank = use all
+    templates: ""
     severity: "critical,high,medium,low,info"
     rate_limit: 150
     bulk_size: 25
@@ -202,9 +290,9 @@ vuln_scanning:
   dalfox:
     enabled: true
     threads: 10
-    blind_xss: ""  # your blind XSS callback URL
+    blind_xss: ""
   sqlmap:
-    enabled: false  # dangerous, enable manually
+    enabled: false
     level: 1
     risk: 1
     batch: true
@@ -215,14 +303,13 @@ vuln_scanning:
     enabled: true
     threads: 20
 
-# --- Sensitive Info ---
 sensitive_info:
   enabled: true
   s3scanner:
     enabled: true
   github_dorking:
     enabled: true
-    token: ""  # GitHub personal access token
+    token: ""
     dorks:
       - "password"
       - "secret"
@@ -240,16 +327,15 @@ sensitive_info:
   google_dorking:
     enabled: true
     dorks:
-      - 'site:{target} ext:sql | ext:db | ext:log | ext:bak'
-      - 'site:{target} ext:xml | ext:conf | ext:cnf | ext:cfg'
-      - 'site:{target} ext:env | ext:ini | ext:yml'
-      - 'site:{target} inurl:admin | inurl:login | inurl:dashboard'
-      - 'site:{target} intitle:"index of"'
-      - 'site:{target} inurl:api | inurl:v1 | inurl:v2'
-      - 'site:{target} ext:php intitle:"phpinfo()"'
-      - 'site:{target} inurl:wp-content | inurl:wp-includes'
+      - "site:{target} ext:sql | ext:db | ext:log | ext:bak"
+      - "site:{target} ext:xml | ext:conf | ext:cnf | ext:cfg"
+      - "site:{target} ext:env | ext:ini | ext:yml"
+      - "site:{target} inurl:admin | inurl:login | inurl:dashboard"
+      - "site:{target} intitle:\"index of\""
+      - "site:{target} inurl:api | inurl:v1 | inurl:v2"
+      - "site:{target} ext:php intitle:\"phpinfo()\""
+      - "site:{target} inurl:wp-content | inurl:wp-includes"
 
-# --- Screenshots ---
 screenshots:
   enabled: true
   gowitness:
@@ -262,13 +348,14 @@ screenshots:
     threads: 5
     timeout: 15000
 
-# --- Reporting ---
 reporting:
   html_report: true
   markdown_report: true
   json_export: true
+  csv_export: true
+  findings_json: true
+  findings_csv: true
 
-# --- Notifications ---
 notifications:
   enabled: false
   slack:
