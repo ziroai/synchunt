@@ -335,6 +335,94 @@ class DependencyChecker:
             "required": False,
             "category": "Sensitive Information",
         },
+        # ---------------- DNS record enumeration ----------------
+        "dnsrecon": {
+            "check": ["dnsrecon", "-h"],
+            "install": "pip install dnsrecon",
+            "required": False,
+            "category": "Validation",
+            "note": "adds record enumeration and a real AXFR attempt to phase 2",
+        },
+        "dnsenum": {
+            "check": ["dnsenum", "--help"],
+            "install": "sudo apt install dnsenum -y",
+            "required": False,
+            "category": "Validation",
+        },
+        # ---------------- OSINT ----------------
+        "theHarvester": {
+            "check": ["theHarvester", "-h"],
+            "install": "pipx install theHarvester  (binary may also be 'theharvester')",
+            "required": False,
+            "category": "Subdomain Enumeration",
+            "note": "passive hosts plus email addresses",
+        },
+        # ---------------- Content discovery ----------------
+        "wfuzz": {
+            "check": ["wfuzz", "--help"],
+            "install": "pip install wfuzz",
+            "required": False,
+            "category": "Content Discovery",
+        },
+        # ---------------- Vulnerability scanning ----------------
+        "joomscan": {
+            "check": ["joomscan", "--help"],
+            "install": "git clone https://github.com/OWASP/joomscan (needs perl)",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        "commix": {
+            "check": ["commix", "--version"],
+            "install": "git clone https://github.com/commixproject/commix",
+            "required": False,
+            "category": "Vulnerability Scanning",
+            "note": "off by default - command injection is opt-in",
+        },
+        "tplmap.py": {
+            "check": ["tplmap.py", "-h"],
+            "install": "git clone https://github.com/epinna/tplmap",
+            "required": False,
+            "category": "Vulnerability Scanning",
+            "note": "off by default - SSTI probing is opt-in",
+        },
+        "ssrfmap.py": {
+            "check": ["ssrfmap.py", "-h"],
+            "install": "git clone https://github.com/swisskyrepo/SSRFmap",
+            "required": False,
+            "category": "Vulnerability Scanning",
+            "note": "off by default - SSRF probing is opt-in",
+        },
+        # ---------------- Screenshots ----------------
+        "eyewitness": {
+            "check": ["eyewitness", "--help"],
+            "install": "pipx install EyeWitness",
+            "required": False,
+            "category": "Screenshots",
+        },
+        # ---------------- Cloud ----------------
+        "cloudbrute": {
+            "check": ["cloudbrute", "-h"],
+            "install": "download a release: https://github.com/0xsha/CloudBrute/releases",
+            "required": False,
+            "category": "Cloud",
+            "note": "off by default - wordlist driven, covers 7 providers",
+        },
+        # ---------------- Prioritisation ----------------
+        "searchsploit": {
+            "check": ["searchsploit", "--version"],
+            "install": "sudo apt install exploitdb -y",
+            "required": False,
+            "category": "Prioritisation",
+            "note": "attaches local Exploit-DB entries to CVE findings (no network)",
+        },
+        # ---------------- Interactive companions (not automated) ----------------
+        "mitmproxy": {
+            "check": ["mitmproxy", "--version"],
+            "install": "pipx install mitmproxy",
+            "required": False,
+            "category": "Interception",
+            "note": "use with --proxy; SyncHunt routes traffic through it instead of driving it",
+        },
     }
 
     # Python packages required for the framework itself to run.

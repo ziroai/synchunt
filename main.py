@@ -29,6 +29,7 @@ from core.context import ScanContext
 from core.database_manager import DatabaseManager, default_db_path
 from core.dependency_checker import DependencyChecker
 from core.logger import BugHuntLogger
+from core.proxy import apply_proxy_env, describe as describe_proxy
 from core.runner import ToolRunner
 from core.utils import (
     create_output_structure,
@@ -192,6 +193,11 @@ class SyncHunt:
             verbose=verbose,
         )
         self.notifier = Notifier(self.config, self.logger)
+        # Route every request (built-in client + child tools) through Burp/ZAP/
+        # mitmproxy when one is configured. No-op otherwise.
+        self.proxy = apply_proxy_env(
+            self.config, getattr(args, "proxy", "") or "", logger=self.logger
+        )
         self.scope: Optional[ScopeManager] = None
         self.selected_phases: List[str] = []
         # Filled in as targets are scanned; consumed by --json-report
@@ -433,6 +439,8 @@ class SyncHunt:
             extra=f"{len(phases)} phases | scope: {scope.describe()}",
         )
         self.logger.info(f"Output directory: {output_dir}")
+        if self.proxy:
+            self.logger.info(f"Proxy: {describe_proxy(self.proxy)}")
         self.logger.info(f"Correlation DB:   {db_path}")
 
         if self.args.dry_run:
@@ -901,6 +909,11 @@ Examples:
     scan_group.add_argument("--threads", type=int, help="worker threads")
     scan_group.add_argument("--timeout", type=int, help="per-tool timeout in seconds")
     scan_group.add_argument("--rate-limit", type=float, help="HTTP requests per second")
+    scan_group.add_argument(
+        "--proxy",
+        help="send all traffic through a proxy, e.g. http://127.0.0.1:8080 "
+             "(Burp Suite / OWASP ZAP / mitmproxy)",
+    )
     scan_group.add_argument("--json-report", metavar="PATH",
                             help="write a machine-readable JSON summary for CI")
 

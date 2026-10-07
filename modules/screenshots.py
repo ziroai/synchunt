@@ -11,7 +11,7 @@ import time
 from typing import List
 
 from core.models import Asset
-from core.utils import read_file_lines
+from core.utils import read_file_lines, write_file_lines
 
 
 class ScreenshotCapture:
@@ -42,6 +42,8 @@ class ScreenshotCapture:
             captured += self.run_gowitness()
         if self.config.is_tool_enabled("screenshots", "aquatone") and captured == 0:
             captured += self.run_aquatone()
+        if self.config.is_tool_enabled("screenshots", "eyewitness") and captured == 0:
+            captured += self.run_eyewitness()
 
         if captured == 0:
             self.logger.skip(
@@ -65,6 +67,31 @@ class ScreenshotCapture:
         for root, _dirs, files in os.walk(directory):
             count += sum(1 for name in files if name.lower().endswith((".png", ".jpg", ".jpeg")))
         return count
+
+    def run_eyewitness(self) -> int:
+        """EyeWitness: screenshots plus a server-header report (opt-in)."""
+        binary = next(
+            (name for name in ("eyewitness", "EyeWitness", "EyeWitness.py")
+             if self.runner.is_available(name)),
+            "",
+        )
+        if not binary:
+            self.logger.debug("EyeWitness is not installed - skipping")
+            return 0
+        cfg = self.config.get_tool_config("screenshots", "eyewitness")
+        hosts_file = os.path.join(self.output_dir, "eyewitness_targets.txt")
+        write_file_lines(hosts_file, self._hosts_limited())
+        report_dir = os.path.join(self.output_dir, "eyewitness")
+        os.makedirs(report_dir, exist_ok=True)
+        cmd = [
+            binary, "--web", "-f", hosts_file, "-d", report_dir,
+            "--no-prompt", "--timeout", str(cfg.get("timeout", 20)),
+        ]
+        if cfg.get("threads"):
+            cmd += ["--threads", str(cfg["threads"])]
+        self.logger.info("Running EyeWitness...")
+        self.runner.run(cmd, tool_name="eyewitness", timeout=1800)
+        return self._count_images(report_dir)
 
     def run_gowitness(self) -> int:
         if self.runner.require("gowitness"):

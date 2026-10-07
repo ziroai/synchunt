@@ -10,11 +10,15 @@ produced its score, so results stay explainable in a report.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import time
 from typing import Dict, Iterable, List, Tuple
 
 from core.models import Finding
+
+CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
 from core.utils import (
     ensure_dir,
     get_timestamp,
@@ -297,6 +301,8 @@ class FindingPrioritizer:
         threshold = severity_rank(self.min_severity)
         self.findings = [f for f in scored if f.severity_rank >= threshold]
 
+        self.enrich_with_searchsploit()
+
         self._update_database()
         self._write_outputs(self.findings)
 
@@ -332,6 +338,78 @@ class FindingPrioritizer:
                 priority=finding.extra.get("priority"),
                 reasons=finding.extra.get("score_reasons"),
             )
+
+    # ------------------------------------------------------------------
+    # Exploit intelligence (searchsploit / Exploit-DB)
+    # ------------------------------------------------------------------
+    def enrich_with_searchsploit(self) -> None:
+        """Attach local Exploit-DB entries to findings that reference a CVE."""
+        if not self.config.get_bool("finding_prioritizer.searchsploit.enabled", True):
+            return
+        runner = getattr(self.ctx, "runner", None)
+        if runner is None or not runner.is_available("searchsploit"):
+            self.logger.debug("searchsploit is not installed - skipping exploit enrichment")
+            return
+
+        def cves_for(finding: Finding) -> List[str]:
+            haystack = " ".join([
+                finding.title, finding.evidence,
+                " ".join(finding.tags), " ".join(finding.references),
+            ])
+            return [match.upper() for match in CVE_RE.findall(haystack)]
+
+        wanted = sorted({cve for finding in self.findings for cve in cves_for(finding)})
+        if not wanted:
+            return
+        max_cves = self.config.get_int("finding_prioritizer.searchsploit.max_cves", 25)
+        mapping: Dict[str, List[Dict]] = {}
+        for cve in wanted[:max_cves]:
+            result = runner.run(
+                ["searchsploit", "--cve", cve, "--json"],
+                tool_name=f"searchsploit-{cve}", timeout=90,
+            )
+            try:
+                payload = json.loads(result.get("stdout") or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            entries = []
+            for item in (payload.get("RESULTS_EXPLOIT") or []):
+                if not isinstance(item, dict):
+                    continue
+                entries.append({
+                    "id": item.get("EDB-ID"),
+                    "title": item.get("Title"),
+                    "path": item.get("Path"),
+                })
+            if entries:
+                mapping[cve] = entries
+
+        if not mapping:
+            return
+        exploit_file = os.path.join(self.output_dir, "exploits.json")
+        save_json(mapping, exploit_file)
+        self.ctx.set_file("exploits_json", exploit_file)
+
+        enriched = 0
+        for finding in self.findings:
+            hits = sorted(set(cves_for(finding)) & set(mapping))
+            if not hits:
+                continue
+            finding.extra["exploitdb"] = {cve: mapping[cve] for cve in hits}
+            if "public-exploit" not in finding.tags:
+                finding.tags.append("public-exploit")
+            finding.score = round(finding.score + min(3.0, float(len(hits))), 2)
+            reasons = finding.extra.setdefault("score_reasons", [])
+            if "public exploit available (Exploit-DB)" not in reasons:
+                reasons.append("public exploit available (Exploit-DB)")
+            finding.extra["priority"] = self.priority_for(finding.score)
+            enriched += 1
+
+        self.findings.sort(key=lambda item: (-item.score, -item.severity_rank))
+        self.logger.found(
+            f"searchsploit: public exploit data for {enriched} finding(s) "
+            f"across {len(mapping)} CVE(s)"
+        )
 
     def _write_outputs(self, findings: List[Finding]) -> None:
         rows = []

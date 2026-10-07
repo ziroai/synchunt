@@ -35,7 +35,10 @@ def test_project_metadata_matches_the_package(pyproject):
 
 
 def test_console_script_points_at_main_main(pyproject):
-    assert pyproject["project"]["scripts"] == {"synchunt": "main:main"}
+    scripts = pyproject["project"]["scripts"]
+    assert scripts["synchunt"] == "main:main"
+    # helper CLI shipped alongside the main entry point
+    assert scripts["synchunt-tools"] == "tools_cli:main"
 
     import main as cli
 

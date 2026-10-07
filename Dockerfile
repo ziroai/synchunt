@@ -28,7 +28,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY core ./core
 COPY modules ./modules
 COPY reports ./reports
-COPY main.py config.yaml pyproject.toml ./
+COPY main.py tools_cli.py config.yaml pyproject.toml ./
 COPY docs ./docs
 COPY README.md LICENSE ./
 COPY scripts ./scripts

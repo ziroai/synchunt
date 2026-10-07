@@ -55,11 +55,16 @@ python3 main.py -d example.com --phase validation,enrichment,takeover,portscan,f
   --profile balanced
 ```
 
-- **Validation** (phase 2): which names actually resolve and answer (httpx or the built-in prober).
+- **Validation** (phase 2): which names actually resolve and answer (httpx or the built-in prober);
+  dnsrecon/dnsenum add record enumeration and a real **AXFR attempt** — a successful zone transfer is
+  recorded as a critical finding.
 - **Enrichment** (phase 3): DNS/TLS/headers/CDN, exposed admin and management paths.
 - **Takeover** (phase 4): CNAME chains matched against 20 takeover-prone services — the cheapest critical bug in recon.
 - **Ports** (phase 5): naabu/nmap/masscan/rustscan.
 - **Fingerprinting** (phase 6): tech stack + WAF (whatweb, waf00f, webanalyze, header heuristics).
+
+Interception plugs in with one flag: `--proxy http://127.0.0.1:8080` routes every SyncHunt request *and*
+every child tool through Burp Suite, ZAP or mitmproxy, so you can watch (and replay) the entire scan.
 
 Useful output: `dns/live_hosts.txt`, `takeover/candidates.json`, `ports/all_ports.txt`, `fingerprinting/technologies.json`.
 
@@ -72,7 +77,13 @@ python3 main.py -d example.com --phase content,api_discovery,jsanalysis,cloud_en
 - **Content** (phase 8): katana/gospider/hakrawler + waybackurls/gau/waymore + gobuster/feroxbuster/ffuf/dirsearch + paramspider/arjun/x8.
 - **API** (phase 9): OpenAPI/Swagger specs, GraphQL endpoints (+ introspection), Spring actuator.
 - **JS** (phase 10): endpoint extraction (linkfinder, jsluice) and secrets (secretfinder, trufflehog, gitleaks, entropy-gated regex).
-- **Cloud** (phase 11): bucket candidates for the discovered names.
+- **Cloud** (phase 11): bucket candidates for the discovered names (optionally cloudbrute across
+  Amazon/Google/Microsoft/DigitalOcean/Vultr/Linode/Alibaba — `cloud_enum.cloudbrute.enabled`).
+- **Pattern buckets**: the merged corpus is classified with the built-in gf/gf-patterns equivalent, one file
+  per bug class in `content_discovery/patterns/` (`ssrf.txt`, `xss.txt`, `sqli.txt`, `lfi.txt`,
+  `redirect.txt`, `ssti.txt`, `idor.txt`, `json-sec.txt`, …). Hand those straight to the matching scanner.
+- **Existing Postman collection?** `synchunt-tools postman collection.json -o extra_urls.txt` turns it into
+  scope-ready URLs.
 
 Useful output: `content_discovery/all_urls.txt`, `params/all_params.txt`, `api_intelligence/endpoints.txt`, `js_analysis/endpoints/`, `cloud_enum/public_buckets.txt`.
 
@@ -85,7 +96,11 @@ python3 main.py -d example.com --phase vulnscan --profile balanced --rate-limit 
 - API route brute force first (`api_introspection.bruteforce`, on by default): a 70-path built-in
   wordlist finds undocumented routes; `admin`/`internal`/`private`/`debug`/`env`/`backup` hits are
   reported as findings so you can check authorisation by hand.
-- nuclei (templates), nikto, wapiti, dalfox/xsstrike (XSS), sqlmap/ghauri (SQLi), crlfuzz, corsy, wpscan (WordPress), plus the built-in open-redirect candidate check.
+- nuclei (templates), nikto, wapiti, dalfox/xsstrike (XSS), sqlmap/ghauri (SQLi), crlfuzz, corsy, wpscan (WordPress), joomscan (Joomla), plus the built-in open-redirect candidate check.
+- Injection classes that are **off by default** because they are intrusive — enable per engagement:
+  `vuln_scanning.commix` (command injection), `vuln_scanning.tplmap` (SSTI, needs `tplmap.py`),
+  `vuln_scanning.ssrfmap` (SSRF; SyncHunt generates the raw request file from each parameterised URL).
+  All three are capped by `max_urls` and only run against URLs already in `params/all_params.txt`.
 ### Out-of-band confirmation (blind XSS / SSRF / XXE)
 
 Blind bugs only show up when the target calls *you*. Enable the built-in OOB client:
@@ -108,6 +123,21 @@ vuln_scanning:
   `custom` when you need full request bodies.
 
 Everything lands in the SQLite database, is de-duplicated by fingerprint and scored (P1–P4) in phase 15.
+
+### Exploit intelligence and hash triage
+
+Phase 15 matches every CVE in the findings against your **local Exploit-DB** (`searchsploit`), tags the
+finding `public-exploit`, bumps its score and writes `findings_prioritized/exploits.json` — so a critical
+with a working PoC sorts above one without.
+
+Hashes (JS bundles, leaked files, GitHub dumps) get triaged without leaving the tool:
+
+```bash
+synchunt-tools identify bundle.js        # hash-shaped tokens inside free text
+synchunt-tools hash-id hashes.txt        # shape + hashcat -m / john --format commands
+```
+
+SyncHunt never cracks anything: it hands you the exact command to run on data you are authorised to test.
 
 ## ⑥ Triage and manual testing — where bounties actually come from
 

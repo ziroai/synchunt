@@ -10,6 +10,7 @@ Every external command is executed as an argv list: user-controlled data
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Dict, List
 
@@ -83,6 +84,14 @@ class VulnScanner:
             self.run_xsstrike()
         if self.config.is_tool_enabled("vuln_scanning", "wpscan"):
             self.run_wpscan()
+        if self.config.is_tool_enabled("vuln_scanning", "joomscan"):
+            self.run_joomscan()
+        if self.config.is_tool_enabled("vuln_scanning", "commix"):
+            self.run_commix()
+        if self.config.is_tool_enabled("vuln_scanning", "tplmap"):
+            self.run_tplmap()
+        if self.config.is_tool_enabled("vuln_scanning", "ssrfmap"):
+            self.run_ssrfmap()
 
         self._check_open_redirects()
         if self.oob is not None:
@@ -598,6 +607,213 @@ class VulnScanner:
                             tags=["wordpress", "plugin", "cve"],
                         )
                     )
+
+    def run_joomscan(self) -> None:
+        """joomscan: Joomla-specific checks (CMS parity with wpscan)."""
+        if self.runner.require("joomscan"):
+            return
+        joom_dir = os.path.join(self.output_dir, "joomscan")
+        os.makedirs(joom_dir, exist_ok=True)
+        cfg = self.config.get_tool_config("vuln_scanning", "joomscan")
+        max_hosts = int(cfg.get("max_hosts", 2))
+        hosts = read_file_lines(self.live_hosts_file)
+        joom_hosts = [
+            host for host in hosts
+            if any(marker in host.lower() for marker in ("joomla", "joom"))
+        ][:max_hosts] or hosts[:max_hosts]
+        self.logger.info(f"Running joomscan on {len(joom_hosts)} host(s)...")
+        for host in joom_hosts:
+            safe = host.replace("https://", "").replace("http://", "")
+            safe = safe.replace("/", "_").replace(":", "_")
+            report = os.path.join(joom_dir, f"{safe}.txt")
+            result = self.runner.run(
+                ["joomscan", "-u", host], tool_name=f"joomscan-{safe[:30]}", timeout=1200
+            )
+            combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+            write_file_lines(report, combined.splitlines())
+            if "not a joomla" in combined.lower():
+                self.logger.debug(f"{host} is not Joomla")
+                continue
+            version = re.search(r"Joomla!?\s*(?:version\s*)?([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+                                combined, re.IGNORECASE)
+            if version:
+                self.findings.append(
+                    Finding(
+                        category="cms",
+                        title=f"Joomla {version.group(1)} detected",
+                        severity="info",
+                        target=self.ctx.target,
+                        url=host,
+                        evidence=truncate(combined, 400),
+                        source="joomscan",
+                        confidence="high",
+                        tags=["joomla", "cms"],
+                    )
+                )
+            for cve in sorted(set(re.findall(r"CVE-\d{4}-\d{4,7}", combined))):
+                self.findings.append(
+                    Finding(
+                        category="cms",
+                        title=f"Joomla vulnerability {cve} (joomscan)",
+                        severity="medium",
+                        target=self.ctx.target,
+                        url=host,
+                        evidence=truncate(combined, 600),
+                        source="joomscan",
+                        confidence="medium",
+                        tags=["joomla", "cms", cve],
+                        references=[f"https://www.cve.org/CVERecord?id={cve}"],
+                    )
+                )
+                self.logger.vuln(f"Joomla CVE candidate on {host}: {cve}")
+
+    def run_commix(self) -> None:
+        """commix: OS command injection on parameterised URLs (opt-in)."""
+        if self.runner.require("commix"):
+            return
+        if not self.params_file or not os.path.exists(self.params_file):
+            self.logger.skip("no parameterised URLs available for commix")
+            return
+        cfg = self.config.get_tool_config("vuln_scanning", "commix")
+        commix_dir = os.path.join(self.output_dir, "commix")
+        os.makedirs(commix_dir, exist_ok=True)
+        self.logger.info("Running commix on parameterised URLs...")
+        for url in read_file_lines(self.params_file)[: int(cfg.get("max_urls", 10))]:
+            safe_name = url.replace("https://", "").replace("http://", "")[:60]
+            safe_name = safe_name.replace("/", "_").replace("?", "_").replace("&", "_")
+            cmd = [
+                "commix", "--url", url, "--batch",
+                "--output-dir", os.path.join(commix_dir, safe_name),
+            ]
+            result = self.runner.run(cmd, tool_name="commix", timeout=600)
+            combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}".lower()
+            if "is vulnerable" in combined or "injectable" in combined:
+                self.findings.append(
+                    Finding(
+                        category="rce",
+                        title="OS command injection (commix)",
+                        severity="critical",
+                        target=self.ctx.target,
+                        url=url,
+                        evidence=truncate(combined, 600),
+                        source="commix",
+                        confidence="medium",
+                        tags=["rce", "command-injection"],
+                    )
+                )
+                self.logger.vuln(f"Command injection candidate: {url}")
+
+    def _ssti_binary(self) -> str:
+        for name in ("tplmap", "tplmap.py"):
+            if self.runner.is_available(name):
+                return name
+        return ""
+
+    def run_tplmap(self) -> None:
+        """tplmap: server-side template injection on parameterised URLs (opt-in)."""
+        binary = self._ssti_binary()
+        if not binary:
+            self.logger.debug("tplmap is not installed - skipping")
+            return
+        if not self.params_file or not os.path.exists(self.params_file):
+            self.logger.skip("no parameterised URLs available for tplmap")
+            return
+        cfg = self.config.get_tool_config("vuln_scanning", "tplmap")
+        ssti_dir = os.path.join(self.output_dir, "ssti")
+        os.makedirs(ssti_dir, exist_ok=True)
+        self.logger.info("Running tplmap on parameterised URLs...")
+        for url in read_file_lines(self.params_file)[: int(cfg.get("max_urls", 5))]:
+            safe_name = url.replace("https://", "").replace("http://", "")[:60]
+            safe_name = safe_name.replace("/", "_").replace("?", "_").replace("&", "_")
+            report = os.path.join(ssti_dir, f"{safe_name}.txt")
+            cmd = [binary, "-u", url, "--level", str(cfg.get("level", 1))]
+            result = self.runner.run(cmd, tool_name="tplmap", timeout=600)
+            combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+            write_file_lines(report, combined.splitlines())
+            lowered = combined.lower()
+            if "injectable" in lowered or "template injection" in lowered:
+                self.findings.append(
+                    Finding(
+                        category="ssti",
+                        title="Server-side template injection (tplmap)",
+                        severity="high",
+                        target=self.ctx.target,
+                        url=url,
+                        evidence=truncate(combined, 600),
+                        source="tplmap",
+                        confidence="medium",
+                        tags=["ssti", "injection"],
+                    )
+                )
+                self.logger.vuln(f"SSTI candidate: {url}")
+
+    def _ssrf_binary(self) -> str:
+        for name in ("ssrfmap", "ssrfmap.py"):
+            if self.runner.is_available(name):
+                return name
+        return ""
+
+    def run_ssrfmap(self) -> None:
+        """ssrfmap: SSRF on parameterised URLs via a generated request file (opt-in)."""
+        binary = self._ssrf_binary()
+        if not binary:
+            self.logger.debug("ssrfmap is not installed - skipping")
+            return
+        if not self.params_file or not os.path.exists(self.params_file):
+            self.logger.skip("no parameterised URLs available for ssrfmap")
+            return
+        from urllib.parse import parse_qsl, urlparse
+
+        cfg = self.config.get_tool_config("vuln_scanning", "ssrfmap")
+        ssrf_dir = os.path.join(self.output_dir, "ssrf")
+        os.makedirs(ssrf_dir, exist_ok=True)
+        self.logger.info("Running ssrfmap on parameterised URLs...")
+        for url in read_file_lines(self.params_file)[: int(cfg.get("max_urls", 5))]:
+            parsed = urlparse(url)
+            params = [name for name, _value in parse_qsl(parsed.query, keep_blank_values=True)]
+            if not parsed.hostname or not params:
+                continue
+            safe_name = url.replace("https://", "").replace("http://", "")[:60]
+            safe_name = safe_name.replace("/", "_").replace("?", "_").replace("&", "_")
+            request_file = os.path.join(ssrf_dir, f"{safe_name}.req")
+            path = parsed.path or "/"
+            if parsed.query:
+                path = f"{path}?{parsed.query}"
+            write_file_lines(
+                request_file,
+                [
+                    f"GET {path} HTTP/1.1",
+                    f"Host: {parsed.hostname}",
+                    "User-Agent: SyncHunt",
+                    "Accept: */*",
+                    "Connection: close",
+                    "",
+                ],
+            )
+            cmd = [
+                binary, "-r", request_file,
+                "-p", params[0],
+                "--level", str(cfg.get("level", 1)),
+            ]
+            result = self.runner.run(cmd, tool_name="ssrfmap", timeout=600)
+            combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+            write_file_lines(os.path.join(ssrf_dir, f"{safe_name}.txt"), combined.splitlines())
+            lowered = combined.lower()
+            if "vulnerable" in lowered or "ssrf" in lowered and "found" in lowered:
+                self.findings.append(
+                    Finding(
+                        category="ssrf",
+                        title="Server-side request forgery (ssrfmap)",
+                        severity="high",
+                        target=self.ctx.target,
+                        url=url,
+                        evidence=truncate(combined, 600),
+                        source="ssrfmap",
+                        confidence="medium",
+                        tags=["ssrf", "injection"],
+                    )
+                )
+                self.logger.vuln(f"SSRF candidate: {url}")
 
     def run_crlfuzz(self) -> None:
         crlf_dir = os.path.join(self.output_dir, "crlf")

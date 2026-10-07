@@ -11,12 +11,14 @@ interpolation into a shell.
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import List
 
 from core.models import Asset
 from core.utils import (
     extract_js_urls,
+    get_timestamp,
     extract_params_from_urls,
     load_json,
     merge_files,
@@ -95,6 +97,7 @@ class ContentDiscovery:
             ("feroxbuster", self.run_feroxbuster),
             ("ffuf", self.run_ffuf),
             ("gobuster", self.run_gobuster),
+            ("wfuzz", self.run_wfuzz),
             ("x8", self.run_x8),
         ):
             if not self.config.is_tool_enabled("content_discovery", tool_name):
@@ -105,6 +108,7 @@ class ContentDiscovery:
                 self.logger.error(f"{tool_name} failed: {exc}")
 
         self._merge_and_categorize()
+        self.classify_urls()
         total = len(read_file_lines(self.get_all_urls_file()))
         self.logger.result(
             f"Content Discovery Complete: {total} unique URL(s) in "
@@ -480,6 +484,71 @@ class ContentDiscovery:
         self.ctx.set_file("urls", self.get_all_urls_file())
         self.ctx.set_file("js_files", self.get_js_files())
         self.ctx.set_file("params", self.get_params_file())
+
+    def run_wfuzz(self) -> None:
+        """wfuzz: secondary directory fuzzer (adds plugins/backups/extensions)."""
+        if self.runner.require("wfuzz"):
+            return
+        cfg = self.config.get_tool_config("content_discovery", "wfuzz")
+        wordlist = cfg.get("wordlist", "wordlists/directories.txt")
+        if not os.path.exists(wordlist):
+            self.logger.skip(f"wfuzz wordlist missing ({wordlist})")
+            return
+        raw_dir = os.path.join(self.dirs_dir, "wfuzz")
+        os.makedirs(raw_dir, exist_ok=True)
+        self.logger.info("Running wfuzz...")
+        for host in read_file_lines(self.live_hosts_file)[:10]:
+            safe = host.replace("https://", "").replace("http://", "")
+            safe = safe.replace("/", "_").replace(":", "_")
+            output_file = os.path.join(raw_dir, f"{safe}.txt")
+            cmd = [
+                "wfuzz", "-w", wordlist,
+                "-u", f"{host.rstrip('/')}/FUZZ",
+                "--hc", str(cfg.get("hide_codes", "404")),
+                "-t", str(cfg.get("threads", 20)),
+                "-o", "raw", "-f", output_file,
+            ]
+            self.runner.run(cmd, tool_name=f"wfuzz-{safe[:30]}", timeout=900)
+        self._ingest_wfuzz(raw_dir)
+
+    def _ingest_wfuzz(self, raw_dir: str) -> None:
+        """wfuzz' raw format differs between versions - harvest URLs generically."""
+        for name in sorted(os.listdir(raw_dir)):
+            if not name.endswith(".txt"):
+                continue
+            text = "\n".join(read_file_lines(os.path.join(raw_dir, name)))
+            for url in re.findall(r"https?://[^\s\"'|]+", text):
+                self.all_urls.add(url.rstrip(",]"))
+
+    def classify_urls(self) -> None:
+        """Built-in gf + gf-patterns equivalent: bucket the corpus by bug class."""
+        if not self.config.get_bool("content_discovery.gf.enabled", True):
+            return
+        urls = sorted(self.all_urls)
+        if not urls:
+            return
+        from core.patterns import classify_urls
+
+        pattern_dir = os.path.join(self.output_dir, "patterns")
+        os.makedirs(pattern_dir, exist_ok=True)
+        buckets = classify_urls(urls)
+        index = {}
+        for name, hits in sorted(buckets.items()):
+            write_file_lines(os.path.join(pattern_dir, f"{name}.txt"), hits)
+            index[name] = len(hits)
+        save_json(
+            {
+                "total_urls": len(urls),
+                "buckets": index,
+                "timestamp": get_timestamp(),
+            },
+            os.path.join(pattern_dir, "index.json"),
+        )
+        self.ctx.set_file("pattern_dir", pattern_dir)
+        if index:
+            summary = ", ".join(f"{key}={value}" for key, value in sorted(index.items())[:8])
+            self.logger.found(f"gf-patterns classification: {summary}")
+
 
     def _record(self) -> None:
         self.ctx.record_assets(

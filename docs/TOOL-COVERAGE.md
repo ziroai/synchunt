@@ -1,160 +1,230 @@
 # Tool coverage
 
-Every category from the standard bug-bounty stack, mapped to what SyncHunt does with it.
-Three states:
+Every tool from the standard bug-bounty stack, cross-checked against what SyncHunt actually does with it.
+Four states:
 
-- **Integrated** — SyncHunt runs it for you (phase + config key). If the binary/token is missing the tool is
+- **Integrated** — SyncHunt runs it for you (phase + config key). Missing binary or token → the tool is
   skipped with a hint and the phase continues.
 - **Built-in** — SyncHunt implements the check itself, so it works with zero external dependencies.
-- **Manual / companion** — deliberately not automated (interactive testing, exploitation, mobile, training);
-  the doc says where it fits in the workflow.
+- **Hooked** — the tool is an interactive platform, and SyncHunt feeds it: all traffic can be routed through
+  it (`--proxy`) or it consumes SyncHunt's artifacts (`live_hosts.txt`, `all_urls.txt`, `findings.json`).
+- **Manual / companion** — deliberately not automated, with the reason and the workflow position stated.
 
 `python3 main.py --check-deps` shows what is installed; `--install-deps` prints the install command for
-everything that is missing.
+everything missing. `synchunt-tools` exposes the offline helpers (dedupe/unfurl/gf/meg/postman/hash-id).
+
+**Automated coverage: 63 of 78 tools (81%)** — the other 15 are manual/companion by design (licences,
+host-level capture, interactive exploitation, credential brute force).
 
 ---
 
-## Recon: subdomains and assets
+## Reconnaissance & subdomain enumeration
 
 | Tool | Status | Where |
 |---|---|---|
-| Subfinder | Integrated | `subdomain_enum.subfinder` (phase 1) |
 | Amass | Integrated | `subdomain_enum.amass` (passive by default) |
+| Subfinder | Integrated | `subdomain_enum.subfinder` (phase 1) |
+| Sublist3r | Integrated | `subdomain_enum.sublist3r` |
 | Assetfinder | Integrated | `subdomain_enum.assetfinder` |
 | Findomain | Integrated | `subdomain_enum.findomain` |
-| Chaos (ProjectDiscovery) | Integrated | `subdomain_enum.chaos` — needs `CHAOS_KEY` / `subdomain_enum.chaos.api_key` |
-| crt.sh | Integrated (built-in, no binary) | `subdomain_enum.crtsh` |
-| SecurityTrails | Integrated | `subdomain_enum.securitytrails` — needs `SECURITYTRAILS_API_KEY` / `subdomain_enum.securitytrails.api_key` |
-| Shodan (passive DNS) | Integrated | `subdomain_enum.shodan` — reuses `SHODAN_API_KEY` / `sensitive_info.shodan.api_key` |
-| Censys | Manual | no API key plumbing; use the Censys UI/API for confirmation, or add a key + endpoint in `modules/subdomain_enum.py` (see *Adding a tool*, `docs/ARCHITECTURE.md`) |
-| httpx | Integrated | `subdomain_validation.httpx` (phase 2) |
-| httprobe | Built-in equivalent | SyncHunt's dependency-free prober (`_builtin_probe`) checks both schemes for every host |
-| dnsx | Integrated | `subdomain_validation.dnsx` |
-| massdns | Integrated | used by puredns (`wordlists/resolvers.txt`) |
-| puredns | Integrated | `subdomain_enum.puredns` (brute force + wordlists) |
-| Naabu | Integrated | `port_scanning.naabu` (phase 5) |
-| Nmap | Integrated | `port_scanning.nmap` |
-| Masscan | Integrated | `port_scanning.masscan` |
-| RustScan | Integrated | `port_scanning.rustscan` (greppable output parsed, ports merged with the rest) |
+| crt.sh | Built-in | `subdomain_enum.crtsh` — certificate transparency, no binary |
+| DNSDumpster | Manual / companion | web UI with no API: use it for a second opinion on the CNAME/A table, then drop the hostnames into `--scope-file` |
+| Alterx | Built-in equivalence | permutation engine in `subdomain_enum.gotator` (wordlist-driven) resolved by `puredns` |
 
-## Content and endpoint discovery
+Also integrated in this phase: Chaos, SecurityTrails, Shodan passive DNS, **theHarvester** (hosts + emails,
+`subdomain_enum.theharvester`), **Censys** (host search, `subdomain_enum.censys` — needs `CENSYS_API_ID` /
+`CENSYS_API_SECRET`).
+
+## Port scanning
 
 | Tool | Status | Where |
 |---|---|---|
-| ffuf | Integrated | `content_discovery.ffuf` (phase 8) |
-| Gobuster | Integrated | `content_discovery.gobuster` |
-| Feroxbuster | Integrated | `content_discovery.feroxbuster` |
-| dirsearch | Integrated | `content_discovery.dirsearch` |
-| Katana | Integrated | `content_discovery.katana` |
-| Gospider | Integrated | `content_discovery.gospider` |
+| Nmap | Integrated | `port_scanning.nmap` (phase 5) |
+| Masscan | Integrated | `port_scanning.masscan` |
+| RustScan | Integrated | `port_scanning.rustscan` (greppable output merged with the rest) |
+| Naabu | Integrated | `port_scanning.naabu` (primary fast pass) |
+
+## Web crawling & content discovery
+
+| Tool | Status | Where |
+|---|---|---|
+| Burp Suite | Hooked | `--proxy http://127.0.0.1:8080` routes every SyncHunt request *and* every child tool through Burp; use `live_hosts.txt` / `all_urls.txt` / `params/all_params.txt` as scope and scan targets |
+| OWASP ZAP | Hooked | same proxy hook; or point ZAP's baseline scan at `live_hosts.txt` |
+| Katana | Integrated | `content_discovery.katana` (phase 8) |
 | Hakrawler | Integrated | `content_discovery.hakrawler` |
 | Waybackurls | Integrated | `content_discovery.waybackurls` |
 | gau | Integrated | `content_discovery.gau` |
-| waymore | Integrated | `content_discovery.waymore` |
-| Arjun | Integrated | `content_discovery.arjun` (results become `?param=FUZZ` URLs for the scanners) |
-| Param Miner | Manual / companion | Burp extension — use it interactively on endpoints SyncHunt surfaces (its `arjun`/`x8` runs cover the automated 80 %) |
-| LinkFinder | Integrated | `js_analysis.linkfinder` (phase 10) |
-| JSluice | Integrated | `js_analysis.jsluice` |
-| SecretFinder | Integrated | `js_analysis.secretfinder` |
+| ParamSpider | Integrated | `content_discovery.paramspider` |
+| Httpx | Integrated | `subdomain_validation.httpx` (phase 2) |
+
+## Directory & file fuzzing
+
+| Tool | Status | Where |
+|---|---|---|
+| ffuf | Integrated | `content_discovery.ffuf` |
+| Gobuster | Integrated | `content_discovery.gobuster` |
+| dirsearch | Integrated | `content_discovery.dirsearch` |
+| Feroxbuster | Integrated | `content_discovery.feroxbuster` |
+| Wfuzz | Integrated | `content_discovery.wfuzz` (secondary pass; raw output parsed generically) |
 
 ## Vulnerability scanning
 
 | Tool | Status | Where |
 |---|---|---|
-| Nuclei | Integrated | `vuln_scanning.nuclei` (phase 12) — JSONL parsed, template categories mapped |
+| Nuclei | Integrated | `vuln_scanning.nuclei` (JSONL parsed, template categories mapped) |
 | Nikto | Integrated | `vuln_scanning.nikto` |
-| Wapiti | Integrated | `vuln_scanning.wapiti` (JSON report parsed, severity levels mapped) |
-| OWASP ZAP | Manual / companion | run ZAP against the URL corpus (`content_discovery/all_urls.txt`) or point it at a host for a baseline scan; SyncHunt is a CLI pipeline, ZAP is an interactive platform |
-| Burp Suite (Pro/Community) | Manual / companion | use SyncHunt's `live_hosts.txt` / `all_urls.txt` / `params/all_params.txt` as Burp scope + scan targets; export SyncHunt findings to SARIF/JSON for your tracker |
-| WPScan | Integrated | `vuln_scanning.wpscan` (WordPress hosts auto-detected by name, JSON parsed, CVSS→severity) |
-| CMSeek | Manual | use `--phase fingerprint` output (`webanalyze`/`whatweb`) to identify the CMS, then run CMSeek manually; the CMS-specific path for WordPress is automated via WPScan |
+| Wapiti | Integrated | `vuln_scanning.wapiti` (JSON report parsed) |
+| Nessus | Manual / companion | commercial, licensed scanner that owns the host-network segment; feed it `live_hosts.txt`/`ports.json`, then import its results into your tracker next to SyncHunt's `findings.csv` |
+| Acunetix | Manual / companion | commercial per-target licence; same handover via `live_hosts.txt` |
 
-## Specific vulnerability classes
+## SQL injection & command injection
 
-| Class | Tool | Status |
+| Tool | Status | Where |
 |---|---|---|
-| SQLi | sqlmap | Integrated — `vuln_scanning.sqlmap` (argv-only, no shell) |
-| SQLi | Ghauri | Integrated — `vuln_scanning.ghauri` |
-| XSS | Dalfox | Integrated — `vuln_scanning.dalfox` (blind XSS via `-b`) |
-| XSS | XSStrike | Integrated — `vuln_scanning.xsstrike` |
-| XSS | XSS Hunter | Manual — supply a `dalfox.blind_xss` callback URL (or an interactsh URL) and skip running your own hunter |
-| SSRF / OOB | Interactsh, Burp Collaborator, Webhook.site | **Integrated** — `core/oob.py` registers a callback endpoint and polls it: `webhook` (webhook.site, plaintext interactions), `interactsh` (register/poll; payloads are AES-encrypted so interactions are reported as observations), or `custom` (your own collector / Burp Collaborator). Dalfox blind XSS is wired automatically; `oob.probe_params` injects callbacks into parameters for SSRF/XXE. Interactions become high-confidence findings (`oob_interactions.json`) |
-| Open redirect | Corsy (CORS) | Integrated — `vuln_scanning.corsy` for CORS, plus a built-in open-redirect **candidate** check that deliberately only lists URLs and never follows attacker-controlled redirects |
-| Open redirect | Oralyzer | Manual — candidates are written by `vuln_scanning`; feed them to Oralyzer or a nuclei `-tags redirect` run |
-| Subdomain takeover | Subjack | Integrated (optional cross-check) — `subdomain_takeover.subjack` |
-| Subdomain takeover | Nuclei takeover templates | Built-in + Nuclei — the built-in phase (CNAME + service fingerprints from can-i-take-over-xyz) runs with no binaries; nuclei runs its own templates in phase 12 |
-| Subdomain takeover | can-i-take-over-xyz | Built-in — 20 service fingerprints with the project's claimability rules and references |
-| Secrets in repos | TruffleHog | Integrated — `js_analysis.trufflehog` (verified flag honoured, values redacted) |
-| Secrets in repos | Gitleaks | Integrated — `js_analysis.gitleaks` (JSON report, redacted) |
-| Secrets in repos | GitHub dorks | Integrated — `github_recon` + `sensitive_info.github_dorking` |
-| LFI / path traversal | LFISuite, ffuf wordlists | Manual / companion — ffuf/dirsearch run with traversal payloads in a wordlist; nuclei `-tags lfi` catches the common cases |
-| Template injection | tplmap, SSTImap | Manual — SyncHunt surfaces template-shaped params (`params/all_params.txt`); these tools need interactive tuning |
-| Request smuggling | Smuggler, HTTP Request Smuggler | Manual — Burp extension workflow (desync probes are intentionally not automated) |
-| CRLF injection | crlfuzz | Integrated — `vuln_scanning.crlfuzz` |
+| SQLMap | Integrated | `vuln_scanning.sqlmap` (argv-only, no shell; opt-in per profile) |
+| Commix | Integrated | `vuln_scanning.commix` (off by default — command injection is opt-in, capped by `max_urls`) |
+
+## XSS
+
+| Tool | Status | Where |
+|---|---|---|
+| Dalfox | Integrated | `vuln_scanning.dalfox` — gets a blind-XSS callback from `core/oob.py` automatically |
+| XSStrike | Integrated | `vuln_scanning.xsstrike` |
+
+## SSRF / SSTI / LFI
+
+| Tool | Status | Where |
+|---|---|---|
+| SSRFmap | Integrated | `vuln_scanning.ssrfmap` (off by default) — SyncHunt generates the raw request file from each parameterised URL and parses the verdict |
+| Gopherus | Manual / companion | payload *generator*: take a confirmed SSRF (SyncHunt's `oob_interactions.json` or ssrfmap hit) and ask Gopherus for the gopher:// payload for the service behind it |
+| Tplmap | Integrated | `vuln_scanning.tplmap` (off by default) — runs against parameterised URLs, hits become `ssti` findings |
+| LFISuite | Manual / companion | interactive/py2; the automated 80% is covered by nuclei `-tags lfi` plus the built-in `lfi` pattern bucket (`patterns/lfi.txt`) |
+
+Blind SSRF/XXE/BXSS confirmation itself is **Built-in** via `core/oob.py` (webhook / interactsh / custom
+collector) — see `docs/WORKFLOW.md`.
+
+## Parameter discovery
+
+| Tool | Status | Where |
+|---|---|---|
+| Arjun | Integrated | `content_discovery.arjun` (results become `?param=FUZZ` URLs for the scanners) |
+| Gf | Built-in | `synchunt-tools gf <pattern>` — same idea, no binary |
+| Gf-Patterns | Built-in | 14 bundled pattern sets in `core/patterns.py` (ssrf, xss, sqli, lfi, redirect, rce, ssti, idor, debug, json-sec, takeovers, params, interestingparams) written to `content_discovery/patterns/<class>.txt` |
+
+## JavaScript analysis
+
+| Tool | Status | Where |
+|---|---|---|
+| LinkFinder | Integrated | `js_analysis.linkfinder` (phase 10) |
+| SecretFinder | Integrated | `js_analysis.secretfinder` |
+
+## DNS
+
+| Tool | Status | Where |
+|---|---|---|
+| Dnsx | Integrated | `subdomain_validation.dnsx` |
+| Dnsrecon | Integrated | `subdomain_validation.dnsrecon` — extra records *and* a real AXFR attempt; a successful transfer is a critical finding |
+| Dnsenum | Integrated | `subdomain_validation.dnsenum` — NS/MX/SRV walk plus AXFR probe, names merged back into validation |
+
+## WAF detection
+
+| Tool | Status | Where |
+|---|---|---|
+| Wafw00f | Integrated | `fingerprinting.wafw00f` (phase 6) |
+
+## Screenshot & visual recon
+
+| Tool | Status | Where |
+|---|---|---|
+| Gowitness | Integrated | `screenshots.gowitness` (phase 14) |
+| Aquatone | Integrated | `screenshots.aquatone` |
+| EyeWitness | Integrated | `screenshots.eyewitness` — fallback when the other two are absent; writes screenshots + the header report |
+
+## Cloud & S3
+
+| Tool | Status | Where |
+|---|---|---|
+| S3Scanner | Integrated | `sensitive_info.s3scanner` (optional binary; built-in bucket checks run regardless) |
+| Prowler | Manual / companion | needs real AWS credentials to review *your own* account; run it separately from an authorised engagement |
+| CloudBrute | Integrated | `cloud_enum.cloudbrute` (off by default) — black-box buckets/apps across Amazon, Google, Microsoft, DigitalOcean, Vultr, Linode, Alibaba; reuses the names derived from the target when no wordlist is given |
+
+Built-in cloud enumeration (`cloud_enum`) needs no tooling at all: AWS/Azure/GCP fingerprinting with
+`NoSuchBucket`/`AccessDenied` semantics.
 
 ## API testing
 
 | Tool | Status | Where |
 |---|---|---|
-| Postman / Insomnia | Manual / companion | use `api_intelligence/api_specs.json` and `endpoints.txt` as the collection source |
-| Kiterunner | Built-in equivalent | `api_introspection.bruteforce` probes a 70-path built-in wordlist (supplementable, capped at `max_paths`/`max_hosts`) against every host and reports route hits, spec documents found by fuzzing, and sensitive routes (`admin`, `internal`, `private`, `debug`, `env`, `backup`) as findings |
-| Akto | Manual | feed it exported traffic/URLs; SyncHunt's role is discovery |
-| Burp extensions (Autorize, AuthMatrix, Param Miner, Logger++, Turbo Intruder, JWT Editor) | Manual / companion | authorization and JWT testing needs a human in the loop; SyncHunt hands over authenticated-request context and param lists |
+| Kiterunner | Built-in equivalence | `api_introspection.bruteforce` — 70 built-in route paths (user wordlist takes priority), spec documents found while fuzzing are parsed, sensitive routes reported |
+| Postman | Built-in importer | `synchunt-tools postman collection.json -o urls.txt` turns a collection (raw or structured URLs, variables substituted) into scope-ready URLs |
 
-## Mobile
+OpenAPI/Swagger discovery and GraphQL introspection are built into `api_introspection` too.
 
-| Tool | Status | Note |
+## CMS scanners
+
+| Tool | Status | Where |
 |---|---|---|
-| MobSF, Frida, Objection, apktool, jadx, Drozer, genymotion/emulator | Manual | out of scope for a web-recon pipeline: `api_intelligence` and `intelligence/hosts.json` often reveal the mobile API surface, which you can then proxy through Burp |
+| WPScan | Integrated | `vuln_scanning.wpscan` (WordPress hosts auto-detected, CVSS→severity) |
+| JoomScan | Integrated | `vuln_scanning.joomscan` — version detection plus CVE findings from its output |
 
-## Wordlists
+## Network & traffic
 
-| Source | Status | Note |
+| Tool | Status | Where |
 |---|---|---|
-| SecLists | Fetched | `scripts/fetch_wordlists.sh` pulls raft/common/parameter lists into `wordlists/` |
-| Assetnote wordlists | Manual | drop them into `wordlists/` and point the relevant config keys at them |
-| FuzzDB | Manual | same — any path in config works |
-| PayloadsAllTheThings | Manual | reference payloads for the manual classes above |
+| MITMproxy | Hooked | `--proxy http://127.0.0.1:8080` (or `general.proxy`) sends all traffic through it, including child tools; `mitmproxy` is in the dependency registry |
+| Wireshark | Manual / companion | host-level packet capture: run it alongside a scan when you need the raw bytes (TLS-decrypted via the same proxy certificate) |
+| Bettercap | Manual / companion | network-layer MITM/ARP tooling, outside an HTTP recon pipeline; use it in a lab, not against a bounty target |
 
-## Utilities and automation
+## Exploitation
 
-| Tool | Status | Note |
+| Tool | Status | Where |
 |---|---|---|
-| anew, qsreplace, gf, unfurl | Built-in equivalents | dedup, param swapping, grep-patterns and URL parsing are done in-process by `core/utils.py` — no shell pipelines needed |
-| httpx pipelines (tomnomnom) | Built-in | the phases pass files between each other; `scan_state.json` + the SQLite DB keep the pipeline state |
-| Notify | Integrated equivalent | `reports/notifier.py` posts scan summaries/critical findings to Slack, Discord or Telegram |
-| Axiom, Interlace | Manual / companion | run one SyncHunt process per host/cloud agent and aggregate the `--json-report` outputs; `scripts/check.sh` runs the local verification suite in parallel |
-| CyberChef | Manual | decoding step when triaging findings |
-| Wappalyzer, BuiltWith | Integrated equivalent | `fingerprinting` (webanalyze + whatweb + header heuristics) |
-| Google dorking | Integrated | `sensitive_info.google_dorking` generates ready-to-click dork URLs |
-| Shodan dorks | Integrated | `sensitive_info.shodan` (+ the Shodan DNS source in phase 1) |
-| GitHub dorking | Integrated | `github_recon` + `sensitive_info.github_dorking` (needs a token) |
+| Searchsploit | Integrated | `finding_prioritizer.searchsploit` (phase 15) — every CVE in the findings is matched against the local Exploit-DB, results land in `findings_prioritized/exploits.json`, tagged `public-exploit`, and the score is bumped |
+| Metasploit | Manual / companion | exploitation is a human decision: SyncHunt hands over the CVE, the affected URL and the exploit reference | 
 
-## Learning platforms
+## Password & hash cracking
 
-| Platform | Note |
-|---|---|
-| PortSwigger Web Security Academy | the best free path through the vulnerability classes SyncHunt scans for; start here, then re-read your own findings in that light |
-| HackTheBox / TryHackMe | practice targets — point SyncHunt at your own lab machines |
-| PentesterLab | exercise-driven, good for API/authz gaps |
-| OWASP Juice Shop, DVWA | run them locally and scan them with SyncHunt to see the full pipeline end-to-end, legally |
+| Tool | Status | Where |
+|---|---|---|
+| Hashcat | Integrated (preflight) | `core/hashid.py` + `synchunt-tools hash-id` identify a hash's shape and print the exact `-m` mode; cracking stays with you |
+| John the Ripper | Integrated (preflight) | same helper prints the `--format=` to use |
+| Hydra | Manual / companion | credential brute forcing is not automated: it is usually prohibited by program rules and is a human decision even when in scope |
 
----
+Hashes found in JS bundles or leaks can be triaged without leaving the tool:
+`synchunt-tools identify bundle.js` lists hash-shaped tokens, `synchunt-tools hash-id hashes.txt` gives the
+Hashcat/John commands.
 
-## What is deliberately *not* automated
+## OSINT & frameworks
 
-- **Exploitation and impact demonstration** — SyncHunt finds and ranks candidates; proving them is a human step.
-- **Destructive or state-changing tests** (desync, mass auth-bypass fuzzing) — out of scope for a pipeline that
-  may be pointed at production.
-- **Interactive proxy work** (Burp/ZAP) — complementary, not competing: bring the URL corpus and findings across.
-- **Mobile binaries** — different toolchain, different lifecycle.
+| Tool | Status | Where |
+|---|---|---|
+| theHarvester | Integrated | `subdomain_enum.theharvester` — passive hosts merged into phase 1, emails → `subdomains/emails.txt` |
+| Shodan | Integrated | `sensitive_info.shodan` + passive DNS in phase 1 (`SHODAN_API_KEY`) |
+| Censys | Integrated | `subdomain_enum.censys` (`CENSYS_API_ID` / `CENSYS_API_SECRET`) |
+| Hunter.io | Integrated | `sensitive_info.hunter` (off by default; `HUNTER_API_KEY`) — domain email discovery into `sensitive_info/hunter/` |
+| Recon-ng | Manual / companion | interactive workspace framework; SyncHunt's SQLite DB and JSON artifacts are the better handover for a single engagement |
+| SpiderFoot | Manual / companion | long-running web UI that aggregates OSINT; complementary to a pipeline, not embeddable |
+| Maltego | Manual / companion | commercial graph GUI; import `findings.csv` / `hosts.json` for visual link analysis |
 
-## Adding a missing tool
+## Utility & helpers
 
-1. add a `tool: {enabled, ...}` block under the phase section in `config.yaml`
-2. add an entry to `DependencyChecker.TOOLS` (check command, verify substring, install hint, category)
-3. implement a `run_<tool>()` method in the phase module following the existing parsers, then call it behind
-   `self.config.is_tool_enabled("<phase>", "<tool>")`
-4. add a test in `tests/test_tool_integrations.py` that monkeypatches `runner.run` and asserts the argv + parsing
+| Tool | Status | Where |
+|---|---|---|
+| Anew | Built-in | `synchunt-tools dedupe` (order-preserving, optional `--sort`, `--count`) |
+| Unfurl | Built-in | `synchunt-tools unfurl --part domains\|keys\|values\|paths\|extensions` |
+| Meg | Built-in | `synchunt-tools meg-urls --hosts hosts.txt --paths paths.txt` (host × path matrix) |
+| Notify | Built-in | `notifications` (Slack, Discord, Telegram webhooks, `critical_only` option) |
 
-That is the whole loop — `docs/ARCHITECTURE.md` §10 has the details.
+## Adding a tool
+
+1. Add the config block (`phase.tool.enabled`) to `config.yaml` and a registry entry to
+   `core/dependency_checker.py` (check/install/required/category).
+2. Add a `run_<tool>()` method in the phase module: `runner.require("<tool>")` to skip cleanly, an **argv
+   list** (never a shell string), a timeout, then parse the tool's real output format.
+3. Gate it with `config.is_tool_enabled("<phase>", "<tool>")`, wire it into `run_all()`, and write artifacts
+   under the phase's output directory.
+4. Add a test in `tests/test_tool_integrations.py` (or `tests/test_tooling_extras.py`) that monkeypatches
+   `ToolRunner.run` and asserts both the argv and the parsing.
+5. Update this file and `docs/WORKFLOW.md`.
+
+Everything above is for **authorised testing only** — in-scope bug-bounty programs or systems you own.

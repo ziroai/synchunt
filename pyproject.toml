@@ -37,6 +37,7 @@ integrations = ["shodan>=1.28.0", "tldextract>=5.0"]
 
 [project.scripts]
 synchunt = "main:main"
+synchunt-tools = "tools_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/ziroai/synchunt"

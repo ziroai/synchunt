@@ -6,6 +6,7 @@ puredns/gotator permutation bruteforcing.
 
 from __future__ import annotations
 
+import base64
 import os
 import time
 from typing import Dict, List
@@ -15,10 +16,14 @@ from core.utils import (
     get_timestamp,
     host_from_url,
     is_valid_domain,
+    load_json,
     read_file_lines,
     save_json,
     write_file_lines,
 )
+
+
+CENSYS_SEARCH_URL = "https://search.censys.io/api/v2/hosts/search"
 
 
 class SubdomainEnumerator:
@@ -58,6 +63,8 @@ class SubdomainEnumerator:
             ("sublist3r", self.run_sublist3r),
             ("puredns", self.run_puredns),
             ("gotator", self.run_gotator),
+            ("theharvester", self.run_theharvester),
+            ("censys", self.run_censys),
         ]
 
         executed = 0
@@ -384,5 +391,91 @@ class SubdomainEnumerator:
 
 
 # Backwards-compatible alias used by older imports
+    def run_theharvester(self) -> List[str]:
+        """theHarvester: passive hosts plus email addresses (OSINT)."""
+        output_file = self._output("theharvester.txt")
+        binary = next(
+            (name for name in ("theHarvester", "theharvester")
+             if self.runner.is_available(name)),
+            "",
+        )
+        if not binary:
+            self.logger.debug("theHarvester is not installed - skipping")
+            return []
+        cfg = self.config.get_tool_config("subdomain_enum", "theharvester")
+        base = os.path.join(self.output_dir, "theharvester")
+        cmd = [
+            binary, "-d", self.target,
+            "-b", str(cfg.get("sources", "duckduckgo,bing,crtsh,otx,urlscan")),
+            "-l", str(cfg.get("limit", 200)),
+            "-f", base,
+        ]
+        self.logger.info("Running theHarvester...")
+        self.runner.run(cmd, tool_name="theharvester", timeout=900)
+
+        data = load_json(base + ".json", {}) or {}
+        if not isinstance(data, dict):
+            data = {}
+        found = set()
+        for host in data.get("hosts", []) or []:
+            name = str(host).split(":")[0].strip().lower().rstrip(".")
+            if name.endswith(self.target):
+                found.add(name)
+        emails = sorted({
+            str(email).strip().lower()
+            for email in (data.get("emails") or [])
+            if "@" in str(email)
+        })
+        if emails:
+            write_file_lines(os.path.join(self.output_dir, "emails.txt"), emails)
+            self.logger.found(f"theHarvester: {len(emails)} email address(es)")
+        if not found:
+            return []
+        write_file_lines(output_file, sorted(found))
+        return self._collect(output_file)
+
+    def run_censys(self) -> List[str]:
+        """Censys host search (needs CENSYS_API_ID / CENSYS_API_SECRET)."""
+        output_file = self._output("censys.txt")
+        api_id = (
+            os.environ.get("CENSYS_API_ID")
+            or self.config.get("subdomain_enum.censys.api_id", "")
+        )
+        api_secret = (
+            os.environ.get("CENSYS_API_SECRET")
+            or self.config.get("subdomain_enum.censys.api_secret", "")
+        )
+        if not (api_id and api_secret):
+            self.logger.debug("censys skipped (no API credentials configured)")
+            return []
+
+        from core.net import http_request
+
+        auth = base64.b64encode(f"{api_id}:{api_secret}".encode()).decode()
+        result = http_request(
+            self.ctx.session, "POST", CENSYS_SEARCH_URL,
+            limiter=self.ctx.limiter, timeout=30,
+            headers={"Authorization": f"Basic {auth}",
+                     "Content-Type": "application/json",
+                     "Accept": "application/json"},
+            json={"q": f"names: {self.target}", "per_page": 100},
+        )
+        if not result.ok:
+            self.logger.warning(f"censys search returned {result.status or result.error}")
+            return []
+        payload = result.json(default={}) or {}
+        found = set()
+        for hit in ((payload.get("result") or {}).get("hits") or []):
+            if not isinstance(hit, dict):
+                continue
+            for name in hit.get("names", []) or []:
+                candidate = str(name).strip().lower().rstrip(".")
+                if candidate.endswith(self.target):
+                    found.add(candidate)
+        if not found:
+            return []
+        write_file_lines(output_file, sorted(found))
+        return self._collect(output_file)
+
 def run_all(ctx) -> str:  # pragma: no cover - convenience helper
     return SubdomainEnumerator(ctx).run_all()

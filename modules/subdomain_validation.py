@@ -9,15 +9,18 @@ framework still works on a bare machine with no ProjectDiscovery tooling.
 from __future__ import annotations
 
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List
 
-from core.models import Asset
+from core.models import Asset, Finding
 from core.net import http_request, resolve_ips
 from core.utils import (
+    load_json,
     read_file_lines,
     read_json_lines,
+    truncate,
     write_file_lines,
 )
 
@@ -30,11 +33,13 @@ class SubdomainValidator:
         self.config = ctx.config
         self.runner = ctx.runner
         self.logger = ctx.logger
+        self.target = ctx.target
         self.output_dir = ctx.path("dns")
         self.subdomains_file = ctx.resolve_file("subdomains", "subdomains", "all_subdomains.txt")
         os.makedirs(self.output_dir, exist_ok=True)
         self.live_hosts: List[str] = []
         self.details: List[Dict] = []
+        self.findings: List[Finding] = []
 
     # ------------------------------------------------------------------
     def get_live_hosts_file(self) -> str:
@@ -53,6 +58,14 @@ class SubdomainValidator:
             self.logger.warning("No subdomains to validate")
             write_file_lines(self.get_live_hosts_file(), [])
             return self.get_live_hosts_file()
+
+        extra = self._run_dns_tools()
+        if extra:
+            before = len(subdomains)
+            subdomains = sorted(set(subdomains) | set(extra))
+            self.logger.found(
+                f"DNS enumeration contributed {len(subdomains) - before} new name(s)"
+            )
 
         self.logger.info(f"Validating {len(subdomains)} subdomain(s)...")
         if self.runner.is_available("httpx"):
@@ -73,7 +86,108 @@ class SubdomainValidator:
         self.ctx.record_assets(
             [Asset(kind="host", value=h, host=h, source="subdomain_validation") for h in live]
         )
+        if self.findings:
+            self.ctx.record_findings(self.findings)
         return self.get_live_hosts_file()
+
+    # ------------------------------------------------------------------
+    # DNS record enumeration (dnsrecon / dnsenum): extra names + AXFR probe
+    # ------------------------------------------------------------------
+    def _run_dns_tools(self) -> List[str]:
+        extra: set = set()
+        for tool_name, method in (
+            ("dnsrecon", self.run_dnsrecon),
+            ("dnsenum", self.run_dnsenum),
+        ):
+            if not self.config.is_tool_enabled("subdomain_validation", tool_name):
+                continue
+            try:
+                extra.update(method() or [])
+            except Exception as exc:
+                self.logger.error(f"{tool_name} failed: {exc}")
+        return sorted(extra)
+
+    def _names_in_text(self, text: str) -> List[str]:
+        pattern = re.compile(
+            r"([A-Za-z0-9_][A-Za-z0-9_.-]*\." + re.escape(self.target) + r")",
+            re.IGNORECASE,
+        )
+        return sorted({
+            match.group(1).lower().rstrip(".")
+            for match in pattern.finditer(text or "")
+        })
+
+    def _zone_transfer_finding(self, tool: str, evidence: str) -> None:
+        """A successful AXFR is a critical exposure - recorded once per zone."""
+        key = f"axfr:{self.target}"
+        if any(f.extra.get("axfr_key") == key for f in self.findings):
+            return
+        finding = Finding(
+            category="dns",
+            title=f"DNS zone transfer (AXFR) succeeded ({tool})",
+            severity="critical",
+            target=self.ctx.target,
+            evidence=truncate(evidence, 600),
+            source=tool,
+            confidence="high",
+            tags=["dns", "axfr", "zone-transfer"],
+            references=["https://owasp.org/www-community/attacks/Zone_Transfer"],
+        )
+        finding.extra["axfr_key"] = key
+        self.findings.append(finding)
+        self.logger.vuln(f"Zone transfer succeeded for {self.target} ({tool})")
+
+    def run_dnsrecon(self) -> List[str]:
+        """dnsrecon: standard record enumeration with a zone-transfer attempt."""
+        output_file = os.path.join(self.output_dir, "dnsrecon.json")
+        if self.runner.require("dnsrecon", output_file):
+            return []
+        self.logger.info("Running dnsrecon...")
+        cfg = self.config.get_tool_config("subdomain_validation", "dnsrecon")
+        cmd = [
+            "dnsrecon", "-d", self.target, "-j", output_file,
+            "--lifetime", str(cfg.get("lifetime", 10)),
+        ]
+        if cfg.get("standard", True):
+            cmd.append("-a")
+        result = self.runner.run(cmd, tool_name="dnsrecon", timeout=900)
+        combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+
+        records = load_json(output_file, []) or []
+        names = set()
+        if isinstance(records, list):
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                name = str(
+                    record.get("name") or record.get("target") or ""
+                ).strip().lower().rstrip(".")
+                if name.endswith(self.target):
+                    names.add(name)
+        if "zone transfer was successful" in combined.lower():
+            self._zone_transfer_finding("dnsrecon", combined)
+        if names:
+            write_file_lines(
+                os.path.join(self.output_dir, "dnsrecon_names.txt"), sorted(names)
+            )
+        return sorted(names)
+
+    def run_dnsenum(self) -> List[str]:
+        """dnsenum: NS/MX/SRV enumeration plus an AXFR probe."""
+        output_file = os.path.join(self.output_dir, "dnsenum.txt")
+        if self.runner.require("dnsenum", output_file):
+            return []
+        self.logger.info("Running dnsenum...")
+        cfg = self.config.get_tool_config("subdomain_validation", "dnsenum")
+        cmd = ["dnsenum", "--noreverse", "--threads",
+               str(cfg.get("threads", 5)), self.target]
+        result = self.runner.run(cmd, tool_name="dnsenum", timeout=900)
+        combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+        write_file_lines(output_file, combined.splitlines())
+        if "axfr record list" in combined.lower():
+            self._zone_transfer_finding("dnsenum", combined)
+        return self._names_in_text(combined)
+
 
     # ------------------------------------------------------------------
     def _run_httpx(self) -> None:

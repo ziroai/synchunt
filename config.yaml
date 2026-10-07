@@ -9,6 +9,8 @@ general:
   threads: 50                    # worker threads for built-in probers
   timeout: 30                    # per-tool / per-request timeout (seconds)
   rate_limit: 50                 # HTTP requests per second (shared token bucket)
+  proxy: ""                      # e.g. "http://127.0.0.1:8080" for Burp/ZAP/mitmproxy
+                                 # (CLI: --proxy, env: SYNCHUNT_PROXY)
   resolve_timeout: 5             # DNS timeout (seconds)
   retry: 2                       # HTTP retries
   user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
@@ -130,6 +132,14 @@ subdomain_enum:
   shodan:
     enabled: true               # Shodan DNS domain API (passive DNS)
     api_key: ""                 # or export SHODAN_API_KEY
+  theharvester:
+    enabled: true               # passive hosts + email addresses (binary: theHarvester)
+    sources: "duckduckgo,bing,crtsh,otx,urlscan"
+    limit: 200
+  censys:
+    enabled: true               # Censys host search (needs keys)
+    api_id: ""                  # or export CENSYS_API_ID
+    api_secret: ""              # or export CENSYS_API_SECRET
 # ------------------------------------------------------------------
 # Phase 2 - Validation
 # ------------------------------------------------------------------
@@ -143,6 +153,13 @@ subdomain_validation:
   dnsx:
     enabled: true
     threads: 100
+  dnsrecon:
+    enabled: true               # extra records + a real AXFR attempt
+    lifetime: 10
+    standard: true
+  dnsenum:
+    enabled: true               # NS/MX/SRV enumeration + AXFR probe
+    threads: 5
 
 # ------------------------------------------------------------------
 # Phase 3 - Asset enrichment
@@ -288,6 +305,14 @@ content_discovery:
     enabled: true
     wordlist: "wordlists/parameters.txt"
     threads: 20
+  wfuzz:
+    enabled: true
+    wordlist: "wordlists/directories.txt"
+    threads: 20
+    hide_codes: "404"
+  gf:
+    enabled: true               # built-in gf/gf-patterns equivalent (no binary)
+                                 # writes content_discovery/patterns/<class>.txt
 
   waymore:
     enabled: true
@@ -365,6 +390,14 @@ cloud_enum:
   azure: true
   gcp: true
   max_candidates: 120
+  cloudbrute:
+    enabled: false              # opt-in: black-box brute force across 7 providers
+    providers: "amazon,google,microsoft,digitalocean,vultr,linode,alibaba"
+    mode: "storage"             # storage | app
+    keyword: ""                 # defaults to the target's first label
+    wordlist: ""                # falls back to names derived from the target
+    threads: 20
+    extra_args: []
 
 # ------------------------------------------------------------------
 # Phase 12 - Vulnerability scanning
@@ -423,6 +456,20 @@ vuln_scanning:
     enabled: true
     max_hosts: 2
     api_token: ""               # or export WPSCAN_API_TOKEN
+  joomscan:
+    enabled: true               # Joomla checks (binary: joomscan)
+    max_hosts: 2
+  commix:
+    enabled: false              # opt-in: command injection (binary: commix)
+    max_urls: 10
+  tplmap:
+    enabled: false              # opt-in: SSTI (binary: tplmap / tplmap.py)
+    max_urls: 5
+    level: 1
+  ssrfmap:
+    enabled: false              # opt-in: SSRF (binary: ssrfmap / ssrfmap.py)
+    max_urls: 5
+    level: 1
 # ------------------------------------------------------------------
 # Phase 13 - Sensitive information / OSINT
 # ------------------------------------------------------------------
@@ -456,6 +503,10 @@ sensitive_info:
     api_key: ""                  # or export SHODAN_API_KEY
   s3scanner:
     enabled: false               # cloud_enum covers buckets without extra tooling
+  hunter:
+    enabled: false               # Hunter.io email discovery (needs a key)
+    api_key: ""                 # or export HUNTER_API_KEY
+    limit: 10
 
 # ------------------------------------------------------------------
 # Phase 14 - Screenshots
@@ -472,6 +523,10 @@ screenshots:
     enabled: true
     threads: 5
     timeout: 15000
+  eyewitness:
+    enabled: true               # fallback when gowitness/aquatone are absent
+    timeout: 20
+    threads: 5
 
 # ------------------------------------------------------------------
 # Phase 14 - Prioritisation
@@ -479,6 +534,9 @@ screenshots:
 finding_prioritizer:
   enabled: true
   min_severity: "info"           # info | low | medium | high | critical
+  searchsploit:
+    enabled: true                # attach Exploit-DB entries to CVE findings
+    max_cves: 25                 # (local searchsploit database, no network)
 
 # ------------------------------------------------------------------
 # Phase 15 - Reporting

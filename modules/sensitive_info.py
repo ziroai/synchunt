@@ -59,6 +59,8 @@ class SensitiveInfoScanner:
             self.run_shodan()
         if self.config.is_tool_enabled("sensitive_info", "s3scanner", False):
             self.run_s3scanner()
+        if self.config.is_tool_enabled("sensitive_info", "hunter", False):
+            self.run_hunter()
 
         self._write_outputs()
         self.ctx.record_findings(self.findings)
@@ -200,6 +202,62 @@ class SensitiveInfoScanner:
                 )
             )
         self.logger.found(f"Shodan: {results.get('total', 0)} result(s)")
+
+    def run_hunter(self) -> None:
+        """Hunter.io: domain email discovery (needs HUNTER_API_KEY)."""
+        api_key = (
+            os.environ.get("HUNTER_API_KEY")
+            or self.config.get("sensitive_info.hunter.api_key", "")
+        )
+        if not api_key:
+            self.logger.skip("Hunter.io API key not configured")
+            return
+        from core.net import http_request
+
+        cfg = self.config.get_tool_config("sensitive_info", "hunter")
+        limit = int(cfg.get("limit", 10))
+        hunter_dir = os.path.join(self.output_dir, "hunter")
+        os.makedirs(hunter_dir, exist_ok=True)
+        url = (
+            f"https://api.hunter.io/v2/domain-search?domain={self.target}"
+            f"&limit={limit}&api_key={api_key}"
+        )
+        result = http_request(
+            self.ctx.session, "GET", url, limiter=self.ctx.limiter, timeout=30
+        )
+        if not result.ok:
+            self.logger.warning(f"Hunter.io returned {result.status or result.error}")
+            return
+        payload = result.json(default={}) or {}
+        data = payload.get("data") or {}
+        emails = [e for e in (data.get("emails") or []) if isinstance(e, dict)]
+        save_json(data, os.path.join(hunter_dir, "domain_search.json"))
+        addresses = sorted({
+            str(entry.get("value", "")).strip().lower()
+            for entry in emails if entry.get("value")
+        })
+        if addresses:
+            write_file_lines(os.path.join(hunter_dir, "emails.txt"), addresses)
+        for entry in emails[:limit]:
+            if not entry.get("value"):
+                continue
+            self.findings.append(
+                Finding(
+                    category="osint",
+                    title="Email address disclosed (Hunter.io)",
+                    severity="info",
+                    target=self.target,
+                    url=f"https://{self.target}",
+                    evidence=(
+                        f"{entry.get('value')} - type={entry.get('type', 'unknown')}, "
+                        f"confidence={entry.get('confidence', '?')}"
+                    ),
+                    source="hunter",
+                    confidence="medium",
+                    tags=["osint", "email"],
+                )
+            )
+        self.logger.found(f"Hunter.io: {len(emails)} email address(es)")
 
     def run_s3scanner(self) -> None:
         """Optional: use the s3scanner binary against generated names."""

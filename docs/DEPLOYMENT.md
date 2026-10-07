@@ -105,7 +105,48 @@ Exit codes: `0` ok · `1` error · `2` usage/config · `3` no valid targets · `
 - **Keep credentials out of the image**: pass `GITHUB_TOKEN`, `SHODAN_API_KEY`,
   `SECURITYTRAILS_API_KEY`, `CHAOS_KEY`, `WPSCAN_API_TOKEN` as environment variables/secrets.
 
-## 5. Hardening and data handling
+## 5. Interception (Burp Suite / OWASP ZAP / mitmproxy)
+
+One flag routes everything SyncHunt sends through a proxy - the built-in HTTP client *and* every child
+tool (nuclei, httpx, ffuf, sqlmap, ...), because the standard proxy environment variables are exported
+before any traffic starts:
+
+```bash
+synchunt -d example.com --full --proxy http://127.0.0.1:8080
+
+# or in config.yaml / the environment
+general:
+  proxy: "http://127.0.0.1:8080"
+export SYNCHUNT_PROXY=http://127.0.0.1:8080
+```
+
+Resolution order: `--proxy` > `general.proxy` > `SYNCHUNT_PROXY`. `NO_PROXY` is left intact and
+`localhost`/`127.0.0.1` are always excluded, so a local proxy cannot loop back into itself.
+
+- **Burp Suite**: set the proxy listener, install Burp's CA in the container/host trust store, then watch
+  every request in the Proxy history. `synchunt-tools dedupe content_discovery/all_urls.txt` gives you a
+  clean scope import.
+- **OWASP ZAP**: same, or point ZAP's baseline scan at `dns/live_hosts.txt` and compare findings.
+- **mitmproxy**: `mitmproxy -p 8080` and use `mitmdump -w flow.dump` to keep a replayable trace of the scan.
+- Interception is off unless you configure it: without a proxy SyncHunt talks directly to the target.
+
+## 6. Offline helper CLI (`synchunt-tools`)
+
+Shipped with the package (no extra install), for the small helpers that usually need `go install`:
+
+```bash
+synchunt-tools dedupe  urls.txt                  # anew
+synchunt-tools unfurl  urls.txt --part keys      # unfurl
+synchunt-tools gf      ssrf urls.txt             # gf + gf-patterns (14 built-in sets)
+synchunt-tools meg-urls --hosts hosts.txt --paths paths.txt
+synchunt-tools postman collection.json -o urls.txt
+synchunt-tools hash-id hashes.txt                # hashcat -m / john --format preflight
+synchunt-tools identify bundle.js                # hashes inside free text
+```
+
+Everything reads files or stdin and prints to stdout, so it composes in shell pipelines.
+
+## 7. Hardening and data handling
 
 - Run as a non-root user; the only privileged feature is raw-socket scanning.
 - `output/` contains findings and possibly secrets: treat it as confidential, restrict permissions, and

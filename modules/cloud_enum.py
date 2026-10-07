@@ -19,6 +19,7 @@ limited, and only names derived from the target are ever probed.
 from __future__ import annotations
 
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
@@ -48,6 +49,7 @@ class CloudEnumerator:
         self.ctx = ctx
         self.config = ctx.config
         self.logger = ctx.logger
+        self.runner = ctx.runner
         self.output_dir = ctx.path("cloud_enum")
         ensure_dir(self.output_dir)
 
@@ -131,6 +133,12 @@ class CloudEnumerator:
                 if index % 25 == 0 or index == len(tasks):
                     self.logger.progress(index, len(tasks), "cloud-enum")
 
+        if self.config.is_tool_enabled("cloud_enum", "cloudbrute", False):
+            try:
+                self.run_cloudbrute()
+            except Exception as exc:
+                self.logger.error(f"cloudbrute failed: {exc}")
+
         self._write_outputs()
         self._record()
 
@@ -208,6 +216,56 @@ class CloudEnumerator:
         self._finding(entry)
         return entry
 
+    def run_cloudbrute(self) -> None:
+        """CloudBrute: black-box buckets/apps across 7 providers (opt-in)."""
+        if self.runner is None or not self.runner.is_available("cloudbrute"):
+            self.logger.debug("cloudbrute is not installed - skipping")
+            return
+        cfg = self.config.get_tool_config("cloud_enum", "cloudbrute")
+        candidates = self._candidate_names()
+        if not candidates:
+            self.logger.warning("cloudbrute: no candidate names could be derived")
+            return
+        wordlist = str(cfg.get("wordlist") or "")
+        if not wordlist or not os.path.exists(wordlist):
+            # Reuse the names derived from the target as the wordlist.
+            wordlist = os.path.join(self.output_dir, "cloudbrute_names.txt")
+            write_file_lines(wordlist, candidates)
+        cmd = [
+            "cloudbrute",
+            "-d", self.ctx.target,
+            "-k", str(cfg.get("keyword", (self.ctx.target or "").split(".")[0])),
+            "-c", str(cfg.get("providers",
+                              "amazon,google,microsoft,digitalocean,vultr,linode,alibaba")),
+            "-m", str(cfg.get("mode", "storage")),
+            "-w", wordlist,
+            "-t", str(cfg.get("threads", 20)),
+        ]
+        cmd += [str(arg) for arg in (cfg.get("extra_args") or [])]
+        self.logger.info("Running cloudbrute across cloud providers...")
+        result = self.runner.run(cmd, tool_name="cloudbrute", timeout=1800)
+        combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+        output_file = os.path.join(self.output_dir, "cloudbrute.txt")
+        write_file_lines(output_file, combined.splitlines())
+
+        hits = sorted({
+            url.rstrip(".,") for url in re.findall(r"https?://[^\s\"']+", combined)
+            if "cloudbrute" not in url
+        })
+        for url in hits:
+            entry = {
+                "provider": "cloudbrute",
+                "name": url.split("//")[-1].split("/")[0],
+                "url": url,
+                "status": 200,
+                "public": True,
+                "exists": True,
+            }
+            self.results.setdefault("cloudbrute", []).append(entry)
+            self._finding(entry)
+        if hits:
+            self.logger.found(f"cloudbrute: {len(hits)} reachable cloud asset(s)")
+
     def _finding(self, entry: Dict) -> None:
         public = entry["public"]
         severity = "critical" if public else "info"
@@ -248,9 +306,10 @@ class CloudEnumerator:
             {
                 "target": self.ctx.target,
                 "candidates_checked": self.max_candidates,
-                "aws": len(self.results["aws"]),
-                "azure": len(self.results["azure"]),
-                "gcp": len(self.results["gcp"]),
+                "aws": len(self.results.get("aws", [])),
+                "azure": len(self.results.get("azure", [])),
+                "gcp": len(self.results.get("gcp", [])),
+                "cloudbrute": len(self.results.get("cloudbrute", [])),
                 "public": len(public_urls),
             },
             os.path.join(self.output_dir, "summary.json"),

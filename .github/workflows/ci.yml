@@ -42,6 +42,10 @@ jobs:
           synchunt --version
           synchunt --list-phases
           synchunt --check-deps || true
+          # the helper CLI ships in the same package
+          printf 'https://a.test/x?id=1\nhttps://a.test/x?id=1\n' | synchunt-tools dedupe --count
+          synchunt-tools gf --list
+          printf '5f4dcc3b5aa765d61d8327deb882cf99\n' | synchunt-tools hash-id
 
       - name: CLI smoke test
         run: |

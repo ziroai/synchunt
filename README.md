@@ -24,6 +24,14 @@
   collector (`vuln_scanning.oob`), so blind bugs become high-confidence findings instead of guesses.
 - **API route brute forcing built in** — a 70-path built-in wordlist (supplementable) finds undocumented
   API routes, with sensitive ones flagged for manual authorisation testing.
+- **Full interactive-platform hook-up** — `--proxy http://127.0.0.1:8080` routes every SyncHunt request *and*
+  every child tool through Burp Suite, OWASP ZAP or mitmproxy (`general.proxy` / `SYNCHUNT_PROXY`).
+- **gf-patterns classification built in** — the URL corpus is bucketed into `patterns/ssrf.txt`, `xss.txt`,
+  `sqli.txt`, `lfi.txt`, `redirect.txt`, `ssti.txt`, `idor.txt`, … so the right scanner sees the right URLs.
+- **Exploit intelligence** — findings that reference a CVE are matched against your local Exploit-DB
+  (`searchsploit`), tagged `public-exploit` and scored up (`findings_prioritized/exploits.json`).
+- **Offline helper CLI** — `synchunt-tools` covers anew (`dedupe`), unfurl (`unfurl`), gf (`gf`), meg
+  (`meg-urls`), Postman collections (`postman`) and hashcat/john preflight (`hash-id`, `identify`).
 - **Subdomain-takeover detection built in** — CNAME chains matched against 20 takeover-prone services
   (fingerprints and claimability rules from can-i-take-over-xyz), no binaries required.
 - **Scope enforced before active tooling** — wildcard domains, IPs/CIDRs and `host:port` entries; in-scope/out-of-scope files; nothing leaves your scope.
@@ -35,7 +43,7 @@
 - **Resumable** — re-run with `--resume` and completed phases are skipped.
 - **Graceful degradation** — every phase works with the tools you have; missing optional tools are skipped with a clear hint, and several phases have built-in fallbacks (crt.sh, HTTP prober, header fingerprinting, OpenAPI/GraphQL probes, cloud-bucket enumeration).
 - **Safe by construction** — no `shell=True` anywhere in the scanning path, rate-limited HTTP session, redacted secrets in output, escaped report rendering.
-- **Tested** — 134 unit/integration tests, CI across Python 3.9–3.12, plus `./scripts/check.sh`.
+- **Tested** — 162 unit/integration tests, CI across Python 3.9–3.12, plus `./scripts/check.sh`.
 
 ---
 
@@ -116,6 +124,20 @@ go install github.com/projectdiscovery/katana/cmd/katana@latest
 ./scripts/fetch_wordlists.sh
 ```
 
+Interactive platforms plug in through one flag: `synchunt -d example.com --proxy http://127.0.0.1:8080`
+sends all traffic (built-in client *and* child tools) through Burp Suite, ZAP or mitmproxy.
+
+The offline helpers ship with the package:
+
+```bash
+synchunt-tools dedupe urls.txt              # anew
+synchunt-tools unfurl urls.txt --part keys  # unfurl
+synchunt-tools gf ssrf urls.txt             # gf + gf-patterns
+synchunt-tools meg-urls --hosts h.txt --paths p.txt
+synchunt-tools postman collection.json      # Postman -> URL list
+synchunt-tools hash-id hashes.txt           # hashcat/john preflight
+```
+
 `python3 main.py --check-deps` lists what is installed and what is missing; `--install-deps`
 prints the install commands. Both exit `1` while anything required is missing, so they can gate a
 CI job. SyncHunt deliberately never runs package managers for you.
@@ -184,21 +206,21 @@ python3 main.py -d target.com --profile balanced --json-report summary.json
 
 | # | Phase | What it does | Tools (optional) |
 |---|---|---|---|
-| 1 | `subdomain` | subdomain discovery | subfinder, amass, assetfinder, findomain, chaos, sublist3r, puredns, gotator + built-in crt.sh, SecurityTrails, Shodan DNS |
-| 2 | `validation` | live host detection | httpx, dnsx + built-in prober fallback |
+| 1 | `subdomain` | subdomain discovery | subfinder, amass, assetfinder, findomain, chaos, sublist3r, theHarvester, puredns, gotator + built-in crt.sh, SecurityTrails, Shodan DNS, Censys |
+| 2 | `validation` | live host detection | httpx, dnsx, dnsrecon, dnsenum (AXFR) + built-in prober fallback |
 | 3 | `enrichment` | DNS/TLS/header/CDN intel, exposure checks | built-in (uses the shared HTTP layer) |
 | 4 | `takeover` | subdomain takeover: CNAME chains + unclaimed-service fingerprints | built-in + optional subjack |
 | 5 | `portscan` | port & service discovery | naabu, nmap, masscan, rustscan |
 | 6 | `fingerprint` | tech-stack & WAF detection | whatweb, wafw00f, webanalyze + header heuristics |
 | 7 | `github_recon` | repositories, issues, leaked secrets | GitHub API (set `github_recon.token`) |
-| 8 | `content` | crawling, URLs, params, directories | katana, gospider, hakrawler, waybackurls, gau, waymore, paramspider, arjun, x8, dirsearch, feroxbuster, ffuf, gobuster |
+| 8 | `content` | crawling, URLs, params, directories | katana, gospider, hakrawler, waybackurls, gau, waymore, paramspider, arjun, x8, dirsearch, feroxbuster, ffuf, gobuster, wfuzz + built-in gf-patterns classification |
 | 9 | `api_discovery` | OpenAPI/Swagger, GraphQL, actuator probes + API route brute force | built-in (70-path wordlist) |
 | 10 | `jsanalysis` | JS endpoints + secret scanning (entropy-gated, redacted) | linkfinder, secretfinder, jsluice, trufflehog, gitleaks, custom regex |
-| 11 | `cloud_enum` | S3 / Azure / GCP bucket candidates | built-in |
-| 12 | `vulnscan` | vulnerability scanning + OOB confirmation | nuclei, nikto, wapiti, dalfox, xsstrike, sqlmap, ghauri, crlfuzz, corsy, wpscan + built-in OOB client |
-| 13 | `sensitive` | dorking & exposed-data checks | GitHub/Google dorking, shodan, s3scanner |
-| 14 | `screenshot` | visual recon | gowitness, aquatone |
-| 15 | `prioritize` | de-dup, score, rank (P1–P4) | built-in |
+| 11 | `cloud_enum` | S3 / Azure / GCP bucket candidates | built-in (+ optional cloudbrute across 7 providers) |
+| 12 | `vulnscan` | vulnerability scanning + OOB confirmation | nuclei, nikto, wapiti, dalfox, xsstrike, sqlmap, ghauri, commix, tplmap, ssrfmap, crlfuzz, corsy, wpscan, joomscan + built-in OOB client |
+| 13 | `sensitive` | dorking & exposed-data checks | GitHub/Google dorking, shodan, s3scanner, hunter.io |
+| 14 | `screenshot` | visual recon | gowitness, aquatone, EyeWitness |
+| 15 | `prioritize` | de-dup, score, rank (P1–P4) + Exploit-DB enrichment | built-in + searchsploit |
 | 16 | `report` | HTML/Markdown/JSON/CSV/SARIF + notifications | built-in |
 
 Each phase produces artifacts that the next phase consumes; artifact paths are resolved automatically even when only a subset of phases runs.
@@ -319,7 +341,7 @@ notifications:
 pip install -r requirements-dev.txt
 ./scripts/check.sh                         # everything below, in parallel
 
-python3 -m pytest tests -q                 # 134 unit + integration tests
+python3 -m pytest tests -q                 # 162 unit + integration tests
 python3 -m pyflakes core modules reports main.py tests
 python3 -m compileall -q core modules reports main.py
 
