@@ -1,210 +1,152 @@
 <div align="center">
 
-# ⚔️ SyncHunt — Automated Bug Hunting Recon Framework
+# ⚔️ SyncHunt — Advanced Automated Bug Hunting Recon Framework
 
 <img src="https://img.shields.io/badge/Python-3.8%2B-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-<img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
-<img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge" alt="Status">
+<img src="https://img.shields.io/badge/Status-Advanced-brightgreen?style=for-the-badge" alt="Status">
 <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-black?style=for-the-badge&logo=linux" alt="Platform">
 
-> 🎯 **Modular, automated reconnaissance framework for professional bug bounty hunters and security researchers**
-
-[Features](#-features) • [Setup](#-quick-setup) • [Usage](#-usage) • [Requirements](#-requirements) • [Contributing](#-contributing)
+> 🎯 Modern automated reconnaissance framework for advanced bug bounty hunting, recon automation, API discovery, cloud exposure checks, and deep target intelligence.
 
 </div>
 
 ---
 
-## 🎯 Features
+## Features
 
-### 🔍 Subdomain Enumeration
-Multiple intelligence sources for maximum coverage
-- Subfinder • Amass • Assetfinder • Findomain • crt.sh • Sublist3r
+### Recon & Discovery
+- Subdomain enumeration with multi-engine support
+- Live host validation, DNS analysis, and IP correlation
+- Content discovery, crawl enumeration, hidden file brute forcing
+- Asset enrichment and HTTP exposure profiling
+- In-scope / out-of-scope filtering
 
-### ✅ Subdomain Validation
-Verify live and responsive assets efficiently
-- httpx • dnsx • massdns
+### API & JS Intelligence
+- GraphQL / OpenAPI / Swagger discovery
+- JS endpoint extraction and secret scanning
+- parameter collection and endpoint mining
+- API exposure classification and method detection
 
-### 🔓 Port Scanning
-Enumerate open ports and services
-- Naabu • Nmap • Masscan
+### Cloud & GitHub Recon
+- S3 / Azure / GCP bucket checks
+- GitHub repo and issue reconnaissance
+- public secret and source exposure detection
+- credential and cloud misconfiguration signals
 
-### 🧩 Web Fingerprinting
-Identify technologies and exposed stacks
-- WhatWeb • wafw00f • webanalyze
+### Advanced Post-Processing
+- Finding prioritization and severity scoring
+- SQLite-backed result correlation and deduplication
+- CSV / JSON exports for downstream analysis
+- structured reporting for quick triage
 
-### 🌐 Content Discovery
-Find hidden files, paths, and endpoints
-- Katana • GoSpider • Hakrawler • waybackurls • gau • ParamSpider • dirsearch • feroxbuster
-
-### 🔬 JavaScript Analysis
-Uncover exposed secrets and patterns in front-end code
-- LinkFinder • SecretFinder • Custom regex detection
-
-### 🚨 Vulnerability Scanning
-Automated testing against common vulnerabilities
-- Nuclei • Nikto • Dalfox • SQLMap • CRLFuzz • Corsy
-
-### 🔑 Sensitive Information Discovery
-Search for exposed credentials, tokens, and misconfigurations
-- S3Scanner • GitHub Dorking • Shodan • Google Dorks
-
-### 📸 Visual Verification
-Capture screenshots for quick manual review
-- Gowitness • Aquatone
-
-### 📊 Professional Reporting
-Generate structured results with actionable intelligence
-- HTML reports • Markdown summaries • Findings tracking
+### Automation Profiles
+- quick
+- balanced
+- full
+- deep
 
 ---
 
-## 🚀 Quick Setup
+## Quick Setup
 
 ```bash
-# 📥 Clone the repository
 git clone https://github.com/ziroai/synchunt.git
 cd synchunt
-
-# 📦 Install Python dependencies
-pip3 install -r requirements.txt
-
-# ✔️ Verify tool dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 python3 main.py --check-deps
 ```
 
 ---
 
-## 💻 Usage
+## Usage
 
-### Full Reconnaissance Scan
+### Full recon pipeline
 ```bash
-python3 main.py -d target.com --full
+python3 main.py -d example.com --full
 ```
 
-### Specific Scanning Phases
+### Balanced profile
 ```bash
-python3 main.py -d target.com --phase subdomain,validation,vulnscan
+python3 main.py -d example.com --profile balanced
 ```
 
-### Multiple Targets
+### Deep recon
+```bash
+python3 main.py -d example.com --profile deep --verbose
+```
+
+### Target list
 ```bash
 python3 main.py -l targets.txt --full
 ```
 
-### Verbose Output
+### Specific phase set
 ```bash
-python3 main.py -d target.com --full -v
+python3 main.py -d example.com --phase subdomain,validation,github_recon,api_discovery,vulnscan
 ```
 
-### Custom Config
+### Custom output dir
 ```bash
-python3 main.py -d target.com --full --config custom_config.yaml
+python3 main.py -d example.com --output-dir output/custom_run
 ```
 
 ---
 
-## ⚙️ Requirements
+## Configuration
 
-| Requirement | Version | Purpose |
-|------------|---------|---------|
-| **Python** | 3.8+ | Core framework |
-| **Go** | 1.19+ | Go-based reconnaissance tools |
-| **OS** | Kali Linux / Ubuntu | Recommended environment |
-| **Memory** | 4GB+ | Better scan performance |
-| **Disk Space** | 10GB+ | Tool installation + reports |
-
-### Recommended Environment
-- 🐧 Kali Linux 2024+
-- 🐧 Ubuntu 22.04 LTS
-- 🍎 macOS 12+ (limited support)
+The project uses `config.yaml` for all major controls, including:
+- output directory and profiles
+- rate limiting and concurrency
+- scope files
+- tool enablement flags
+- API and JS recon settings
+- cloud and GitHub recon settings
+- reporting and notifications
 
 ---
 
-## 📋 Phases Overview
+## Requirements
 
-| Phase | Description | Tools |
-|-------|-------------|-------|
-| 🔍 Reconnaissance | Gather initial intelligence | Subfinder, Amass, crt.sh |
-| ✅ Validation | Confirm live assets | httpx, dnsx, massdns |
-| 🔓 Scanning | Port and service discovery | Naabu, Nmap, Masscan |
-| 🧩 Fingerprinting | Identify tech stack | WhatWeb, wafw00f, webanalyze |
-| 🌐 Crawling | Enumerate endpoints and paths | Katana, GoSpider, Hakrawler |
-| 🔬 Analysis | Deep code inspection | LinkFinder, SecretFinder |
-| 🚨 Vulnerability | Security assessment | Nuclei, Dalfox, SQLMap |
-| 📸 Verification | Visual confirmation | Gowitness, Aquatone |
+- Python 3.8+
+- Linux/macOS
+- Optional toolchain: Amass, Subfinder, Nmap, Masscan, FFUF, Katana, etc.
+- Recommended: Kali or Ubuntu-based environment
 
 ---
 
-## 🔒 Legal & Ethical Disclaimer
+## Architecture Overview
 
-⚠️ **IMPORTANT**: This tool is intended for **authorized security testing only**.
-
-- ✅ Test systems you own or have explicit written permission to assess
-- ❌ Do not use unauthorized access or intrusive testing
-- 📜 Comply with local laws, regulations, and program scope rules
-- 🤝 Respect bug bounty policies and responsible disclosure practices
-
-**By using this project, you agree to use it legally and responsibly.**
+- `main.py` — central orchestrator
+- `core/` — config management, runtime, database, utility helpers
+- `modules/` — recon modules for discovery, scanning, JS, API, GitHub, cloud
+- `reports/` — HTML / Markdown / JSON reporting
 
 ---
 
-## 🤝 Contributing
+## Legal & Ethical Use
 
-We welcome contributions from the security community.
+This project is intended for authorized security testing only.
 
-1. 🍴 Fork the repository
-2. 🌿 Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. 💾 Commit your changes (`git commit -m 'Add amazing feature'`)
-4. 📤 Push the branch (`git push origin feature/amazing-feature`)
-5. 🔄 Open a Pull Request
-
-### Guidelines
-- Follow Python style best practices
-- Add tests for new features
-- Update documentation when needed
-- Keep changes focused and readable
+- Only test targets you own or are explicitly authorized to test
+- Respect bug bounty scope and program rules
+- Avoid destructive or unauthorized activity
 
 ---
 
-## 📚 Resources
+## Contributing
 
-- 📖 Full docs
-- 🔧 Configuration guide
-- 🎓 Tutorials and examples
-- 🐛 Troubleshooting
+Contributions are welcome.
 
----
-
-## 📞 Support & Issues
-
-- 🐛 [Report a bug](https://github.com/ziroai/synchunt/issues/new)
-- 💡 [Request a feature](https://github.com/ziroai/synchunt/issues/new)
-- 💬 [Discussions](https://github.com/ziroai/synchunt/discussions)
+1. Fork the repo
+2. Create a feature branch
+3. Implement improvements
+4. Run validation checks
+5. Submit a pull request
 
 ---
 
-## 📜 License
+## License
 
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- 🔧 Built with community-driven security tools
-- 👥 Inspired by the bug bounty and red team ecosystem
-- ⭐ Thanks to contributors and ethical researchers everywhere
-
----
-
-<div align="center">
-
-### 🌟 If you find SyncHunt useful, please consider starring the project.
-
-[![GitHub stars](https://img.shields.io/github/stars/ziroai/synchunt?style=social)](https://github.com/ziroai/synchunt)
-[![GitHub watchers](https://img.shields.io/github/watchers/ziroai/synchunt?style=social)](https://github.com/ziroai/synchunt)
-
-**Happy hunting! 🎯**
-
-</div>
+MIT License
