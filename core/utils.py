@@ -98,10 +98,19 @@ def create_output_structure(base_dir):
 
 
 def target_slug(target):
-    """Filesystem-safe directory name for a target (matches the output tree)."""
+    """
+    Filesystem-safe directory name for a target (identical on every platform).
+
+    URLs are reduced to host[:port] so the run directory is valid on Windows
+    too - `?`, `:`, `*` and friends are not legal filename characters there.
+    """
     value = str(target or "").strip()
-    value = value.replace("https://", "").replace("http://", "")
-    return value.replace("/", "_").replace(":", "_").replace("*", "_")
+    lowered = value.lower()
+    for prefix in ("https://", "http://", "ftp://"):
+        if lowered.startswith(prefix):
+            value = value[len(prefix):]
+            break
+    return sanitize_filename(value.replace("/", "_"), max_length=100)
 
 
 def ensure_dir(path):
@@ -514,10 +523,29 @@ def format_duration(seconds):
     return f"{secs}s"
 
 
+_RESERVED_FILENAMES = {
+    "con", "prn", "aux", "nul",
+    *(f"com{index}" for index in range(1, 10)),
+    *(f"lpt{index}" for index in range(1, 10)),
+}
+
+
 def sanitize_filename(name, max_length=120):
-    """Sanitize a string for use as filename."""
-    cleaned = re.sub(r"[^\w\-.]+", "_", str(name or "")).strip("._")
-    return cleaned[:max_length] or "unnamed"
+    """
+    Sanitize a string for use as a filename on every supported platform.
+
+    Windows forbids ``<>:"/\|?*`` and trailing dots/spaces, and reserves
+    device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9); POSIX only forbids
+    ``/`` and NUL. Using one sanitizer keeps artifact names identical on
+    Linux, macOS and Windows.
+    """
+    cleaned = re.sub(r"[^\w\-.]+", "_", str(name or "")).strip("._ ")
+    if not cleaned:
+        return "unnamed"
+    cleaned = cleaned[:max_length].rstrip("._ ")
+    if cleaned.split(".")[0].lower() in _RESERVED_FILENAMES:
+        cleaned = f"_{cleaned}"
+    return cleaned or "unnamed"
 
 
 def truncate(text, limit=200, suffix="..."):

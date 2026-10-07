@@ -84,7 +84,9 @@ def test_gobuster_output_is_ingested(ctx):
     write_file_lines(live, ["https://example.com"])
     ctx.set_file("live_hosts", live)
     ctx.config.set("content_discovery.gobuster.enabled", True)
-    ctx.config.set("content_discovery.gobuster.wordlist", "/dev/null")
+    wordlist = os.path.join(ctx.output_dir, "wordlist.txt")
+    write_file_lines(wordlist, ["admin", "robots.txt"])
+    ctx.config.set("content_discovery.gobuster.wordlist", wordlist)
 
     phase = ContentDiscovery(ctx)
     raw_dir = os.path.join(phase.dirs_dir, "gobuster")

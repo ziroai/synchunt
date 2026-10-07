@@ -17,6 +17,7 @@ from typing import List
 
 from core.models import Asset
 from core.utils import (
+    sanitize_filename,
     extract_js_urls,
     get_timestamp,
     extract_params_from_urls,
@@ -235,8 +236,9 @@ class ContentDiscovery:
 
         self.logger.info("Running dirsearch...")
         for host in read_file_lines(self.live_hosts_file)[:20]:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             output_file = os.path.join(raw_dir, f"{safe}.txt")
             cmd = [
                 "dirsearch", "-u", host, "-t", str(cfg.get("threads", 30)),
@@ -260,8 +262,9 @@ class ContentDiscovery:
 
         self.logger.info("Running feroxbuster...")
         for host in read_file_lines(self.live_hosts_file)[:10]:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             output_file = os.path.join(raw_dir, f"{safe}.txt")
             cmd = [
                 "feroxbuster", "-u", host, "-w", wordlist,
@@ -288,8 +291,9 @@ class ContentDiscovery:
         extensions = str(cfg.get("extensions", "php,html,js,json,txt"))
         self.logger.info("Running ffuf...")
         for host in read_file_lines(self.live_hosts_file)[:10]:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             output_file = os.path.join(raw_dir, f"{safe}.json")
             cmd = [
                 "ffuf", "-u", f"{host.rstrip('/')}/FUZZ", "-w", wordlist,
@@ -322,8 +326,9 @@ class ContentDiscovery:
 
         self.logger.info("Running x8 parameter discovery...")
         for host in read_file_lines(self.live_hosts_file)[:10]:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             output_file = os.path.join(raw_dir, f"{safe}.txt")
             cmd = [
                 "x8", "-u", host, "-w", wordlist,
@@ -379,8 +384,9 @@ class ContentDiscovery:
         self.logger.info("Running gobuster...")
         host_by_file = {}
         for host in read_file_lines(self.live_hosts_file)[:10]:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             output_file = os.path.join(raw_dir, f"{safe}.txt")
             host_by_file[output_file] = host.rstrip("/")
             cmd = [
@@ -416,8 +422,9 @@ class ContentDiscovery:
 
         self.logger.info("Running arjun parameter discovery...")
         for host in read_file_lines(self.live_hosts_file)[:10]:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             output_file = os.path.join(raw_dir, f"{safe}.json")
             cmd = [
                 "arjun", "-u", host, "-oJ", output_file,
@@ -503,8 +510,9 @@ class ContentDiscovery:
         os.makedirs(raw_dir, exist_ok=True)
         self.logger.info("Running wfuzz...")
         for host in read_file_lines(self.live_hosts_file)[:10]:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             output_file = os.path.join(raw_dir, f"{safe}.txt")
             cmd = [
                 "wfuzz", "-w", wordlist,

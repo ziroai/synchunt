@@ -18,6 +18,7 @@ from core.models import Asset, Finding
 from core.net import http_request
 from core.oob import build_client as build_oob_client
 from core.utils import (
+    sanitize_filename,
     load_json,
     read_file_lines,
     read_json_lines,
@@ -362,8 +363,9 @@ class VulnScanner:
         self.logger.info("Running sqlmap on parameterised URLs...")
 
         for url in read_file_lines(self.params_file)[:20]:
-            safe_name = url.replace("https://", "").replace("http://", "")[:60]
-            safe_name = safe_name.replace("/", "_").replace("?", "_").replace("&", "_")
+            safe_name = sanitize_filename(
+                url.replace("https://", "").replace("http://", ""), 60
+            )
             output_dir_sqli = os.path.join(sqli_dir, safe_name)
             # argv list => no shell parsing, so a crafted URL cannot execute code.
             cmd = [
@@ -407,8 +409,9 @@ class VulnScanner:
         cfg = self.config.get_tool_config("vuln_scanning", "wapiti")
         self.logger.info("Running wapiti...")
         for host in read_file_lines(self.live_hosts_file)[: int(cfg.get("max_hosts", 5))]:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             host_report = os.path.join(wapiti_dir, f"{safe}.json")
             cmd = [
                 "wapiti", "-u", host, "-f", "json", "-o", host_report,
@@ -547,8 +550,9 @@ class VulnScanner:
         cfg = self.config.get_tool_config("vuln_scanning", "wpscan")
         self.logger.info(f"Running wpscan on {len(wp_hosts)} host(s)...")
         for host in wp_hosts:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             report_file = os.path.join(wp_dir, f"{safe}.json")
             cmd = [
                 "wpscan", "--url", host, "--format", "json",
@@ -636,8 +640,9 @@ class VulnScanner:
         ][:max_hosts] or hosts[:max_hosts]
         self.logger.info(f"Running joomscan on {len(joom_hosts)} host(s)...")
         for host in joom_hosts:
-            safe = host.replace("https://", "").replace("http://", "")
-            safe = safe.replace("/", "_").replace(":", "_")
+            safe = sanitize_filename(
+                host.replace("https://", "").replace("http://", ""), 60
+            )
             report = os.path.join(joom_dir, f"{safe}.txt")
             result = self.runner.run(
                 ["joomscan", "-u", host], tool_name=f"joomscan-{safe[:30]}", timeout=1200
