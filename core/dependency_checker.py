@@ -1,348 +1,441 @@
 """
-BugHuntRecon - Dependency Checker
-Verifies all required tools are installed and accessible.
+SyncHunt - Dependency Checker
+Verifies that external tools and Python packages are installed and usable.
+
+Each entry may declare a `verify` substring: some binary names are shared with
+unrelated tools (notably `httpx`, which is also a popular Python HTTP client),
+so a tool only counts as present when its version output identifies it.
 """
 
+from __future__ import annotations
+
+import importlib.util
 import shutil
 import subprocess
-import sys
+from typing import Dict, List, Optional
+
 from colorama import Fore, Style
 
 
 class DependencyChecker:
     """Check and report on tool dependencies."""
 
-    # Tool definitions: (name, check_command, install_hint, required)
     TOOLS = {
-        # Go-based tools
-        'subfinder': {
-            'check': 'subfinder -version',
-            'install': 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest',
-            'required': True,
-            'category': 'Subdomain Enumeration'
+        # ---------------- Subdomain enumeration ----------------
+        "subfinder": {
+            "check": ["subfinder", "-version"],
+            "verify": "subfinder",
+            "install": "go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest",
+            "required": True,
+            "category": "Subdomain Enumeration",
         },
-        'amass': {
-            'check': 'amass -version',
-            'install': 'go install -v github.com/owasp-amass/amass/v4/...@master',
-            'required': False,
-            'category': 'Subdomain Enumeration'
+        "amass": {
+            "check": ["amass", "-version"],
+            "verify": "amass",
+            "install": "go install -v github.com/owasp-amass/amass/v4/...@master",
+            "required": False,
+            "category": "Subdomain Enumeration",
         },
-        'assetfinder': {
-            'check': 'assetfinder -h',
-            'install': 'go install -v github.com/tomnomnom/assetfinder@latest',
-            'required': False,
-            'category': 'Subdomain Enumeration'
+        "assetfinder": {
+            "check": ["assetfinder", "-h"],
+            "install": "go install -v github.com/tomnomnom/assetfinder@latest",
+            "required": False,
+            "category": "Subdomain Enumeration",
         },
-        'findomain': {
-            'check': 'findomain --version',
-            'install': 'Download from https://github.com/Findomain/Findomain/releases',
-            'required': False,
-            'category': 'Subdomain Enumeration'
+        "findomain": {
+            "check": ["findomain", "--version"],
+            "install": "Download from https://github.com/Findomain/Findomain/releases",
+            "required": False,
+            "category": "Subdomain Enumeration",
         },
-        'httpx': {
-            'check': 'httpx -version',
-            'install': 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest',
-            'required': True,
-            'category': 'Validation'
+        "puredns": {
+            "check": ["puredns", "--version"],
+            "install": "go install github.com/d3mondev/puredns/v2@latest",
+            "required": False,
+            "category": "Subdomain Enumeration",
         },
-        'puredns': {
-            'check': 'puredns --version',
-            'install': 'go install github.com/d3mondev/puredns/v2@latest',
-            'required': False,
-            'category': 'Subdomain Enumeration'
+        "gotator": {
+            "check": ["gotator", "-h"],
+            "install": "go install github.com/Josue87/gotator@latest",
+            "required": False,
+            "category": "Subdomain Enumeration",
         },
-        'gotator': {
-            'check': 'gotator -h',
-            'install': 'go install github.com/Josue87/gotator@latest',
-            'required': False,
-            'category': 'Subdomain Enumeration'
+        # ---------------- Validation / probing ----------------
+        "httpx": {
+            "check": ["httpx", "-version"],
+            "verify": "projectdiscovery",
+            "install": "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest",
+            "required": True,
+            "category": "Validation",
+            "note": "the Python 'httpx' CLI shares this name; SyncHunt verifies the output",
         },
-        'dnsx': {
-            'check': 'dnsx -version',
-            'install': 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest',
-            'required': False,
-            'category': 'Validation'
+        "dnsx": {
+            "check": ["dnsx", "-version"],
+            "verify": "projectdiscovery",
+            "install": "go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest",
+            "required": False,
+            "category": "Validation",
         },
-        'naabu': {
-            'check': 'naabu -version',
-            'install': 'go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest',
-            'required': False,
-            'category': 'Port Scanning'
+        "massdns": {
+            "check": ["massdns", "--help"],
+            "install": "sudo apt install massdns -y",
+            "required": False,
+            "category": "Validation",
         },
-        'nuclei': {
-            'check': 'nuclei -version',
-            'install': 'go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest',
-            'required': True,
-            'category': 'Vulnerability Scanning'
+        # ---------------- Port scanning ----------------
+        "naabu": {
+            "check": ["naabu", "-version"],
+            "verify": "projectdiscovery",
+            "install": "go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest",
+            "required": False,
+            "category": "Port Scanning",
         },
-        'katana': {
-            'check': 'katana -version',
-            'install': 'go install -v github.com/projectdiscovery/katana/cmd/katana@latest',
-            'required': False,
-            'category': 'Content Discovery'
+        "nmap": {
+            "check": ["nmap", "--version"],
+            "verify": "nmap",
+            "install": "sudo apt install nmap -y",
+            "required": False,
+            "category": "Port Scanning",
         },
-        'gospider': {
-            'check': 'gospider -v',
-            'install': 'go install -v github.com/jaeles-project/gospider@latest',
-            'required': False,
-            'category': 'Content Discovery'
+        "masscan": {
+            "check": ["masscan", "--version"],
+            "verify": "masscan",
+            "install": "sudo apt install masscan -y",
+            "required": False,
+            "category": "Port Scanning",
         },
-        'gau': {
-            'check': 'gau -version',
-            'install': 'go install -v github.com/lc/gau/v2/cmd/gau@latest',
-            'required': False,
-            'category': 'Content Discovery'
+        # ---------------- Fingerprinting ----------------
+        "whatweb": {
+            "check": ["whatweb", "--version"],
+            "install": "sudo apt install whatweb -y",
+            "required": False,
+            "category": "Fingerprinting",
         },
-        'hakrawler': {
-            'check': 'hakrawler -h',
-            'install': 'go install -v github.com/hakluke/hakrawler@latest',
-            'required': False,
-            'category': 'Content Discovery'
+        "wafw00f": {
+            "check": ["wafw00f", "-h"],
+            "install": "pip install wafw00f",
+            "required": False,
+            "category": "Fingerprinting",
         },
-        'waybackurls': {
-            'check': 'waybackurls -h',
-            'install': 'go install -v github.com/tomnomnom/waybackurls@latest',
-            'required': False,
-            'category': 'Content Discovery'
+        "webanalyze": {
+            "check": ["webanalyze", "-h"],
+            "install": "go install -v github.com/rverton/webanalyze/cmd/webanalyze@latest",
+            "required": False,
+            "category": "Fingerprinting",
         },
-        'dalfox': {
-            'check': 'dalfox version',
-            'install': 'go install -v github.com/hahwul/dalfox/v2@latest',
-            'required': False,
-            'category': 'Vulnerability Scanning'
+        # ---------------- Content discovery ----------------
+        "waybackurls": {
+            "check": ["waybackurls", "-h"],
+            "install": "go install -v github.com/tomnomnom/waybackurls@latest",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'crlfuzz': {
-            'check': 'crlfuzz -version',
-            'install': 'go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest',
-            'required': False,
-            'category': 'Vulnerability Scanning'
+        "gau": {
+            "check": ["gau", "-version"],
+            "install": "go install -v github.com/lc/gau/v2/cmd/gau@latest",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'gowitness': {
-            'check': 'gowitness -h',
-            'install': 'go install -v github.com/sensepost/gowitness@latest',
-            'required': False,
-            'category': 'Screenshots'
+        "katana": {
+            "check": ["katana", "-version"],
+            "verify": "projectdiscovery",
+            "install": "go install -v github.com/projectdiscovery/katana/cmd/katana@latest",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'ffuf': {
-            'check': 'ffuf -V',
-            'install': 'go install github.com/ffuf/ffuf@latest',
-            'required': False,
-            'category': 'Content Discovery'
+        "gospider": {
+            "check": ["gospider", "-v"],
+            "install": "go install -v github.com/jaeles-project/gospider@latest",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'x8': {
-            'check': 'x8 --version',
-            'install': 'cargo install x8',
-            'required': False,
-            'category': 'Content Discovery'
+        "hakrawler": {
+            "check": ["hakrawler", "-h"],
+            "install": "go install -v github.com/hakluke/hakrawler@latest",
+            "required": False,
+            "category": "Content Discovery",
         },
-
-        # System tools
-        'nmap': {
-            'check': 'nmap --version',
-            'install': 'sudo apt install nmap -y',
-            'required': False,
-            'category': 'Port Scanning'
+        "paramspider": {
+            "check": ["paramspider", "-h"],
+            "install": "pip install paramspider",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'masscan': {
-            'check': 'masscan --version',
-            'install': 'sudo apt install masscan -y',
-            'required': False,
-            'category': 'Port Scanning'
+        "dirsearch": {
+            "check": ["dirsearch", "-h"],
+            "install": "pip install dirsearch",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'massdns': {
-            'check': 'massdns --help',
-            'install': 'sudo apt install massdns -y',
-            'required': False,
-            'category': 'Validation'
+        "feroxbuster": {
+            "check": ["feroxbuster", "--version"],
+            "install": "cargo install feroxbuster  (or a release binary)",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'whatweb': {
-            'check': 'whatweb --version',
-            'install': 'sudo apt install whatweb -y',
-            'required': False,
-            'category': 'Fingerprinting'
+        "ffuf": {
+            "check": ["ffuf", "-V"],
+            "install": "go install github.com/ffuf/ffuf/v2@latest",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'wafw00f': {
-            'check': 'wafw00f -h',
-            'install': 'pip install wafw00f',
-            'required': False,
-            'category': 'Fingerprinting'
+        "x8": {
+            "check": ["x8", "--version"],
+            "install": "cargo install x8",
+            "required": False,
+            "category": "Content Discovery",
         },
-        'nikto': {
-            'check': 'nikto -Version',
-            'install': 'sudo apt install nikto -y',
-            'required': False,
-            'category': 'Vulnerability Scanning'
+        # ---------------- JS analysis ----------------
+        "linkfinder": {
+            "check": ["linkfinder", "-h"],
+            "install": "pip install linkfinder",
+            "required": False,
+            "category": "JS Analysis",
         },
-
-        # Python tools
-        'sqlmap': {
-            'check': 'sqlmap --version',
-            'install': 'pip install sqlmap',
-            'required': False,
-            'category': 'Vulnerability Scanning'
+        "secretfinder": {
+            "check": ["secretfinder", "-h"],
+            "install": "pip install secretfinder",
+            "required": False,
+            "category": "JS Analysis",
         },
-        'dirsearch': {
-            'check': 'dirsearch -h',
-            'install': 'pip install dirsearch',
-            'required': False,
-            'category': 'Content Discovery'
+        # ---------------- Vulnerability scanning ----------------
+        "nuclei": {
+            "check": ["nuclei", "-version"],
+            "verify": "projectdiscovery",
+            "install": "go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
+            "required": True,
+            "category": "Vulnerability Scanning",
         },
-        'paramspider': {
-            'check': 'paramspider -h',
-            'install': 'pip install paramspider',
-            'required': False,
-            'category': 'Content Discovery'
+        "nikto": {
+            "check": ["nikto", "-Version"],
+            "install": "sudo apt install nikto -y",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        "dalfox": {
+            "check": ["dalfox", "version"],
+            "install": "go install -v github.com/hahwul/dalfox/v2@latest",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        "sqlmap": {
+            "check": ["sqlmap", "--version"],
+            "install": "sudo apt install sqlmap -y",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        "crlfuzz": {
+            "check": ["crlfuzz", "-version"],
+            "install": "go install -v github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        "corsy": {
+            "check": ["corsy", "-h"],
+            "install": "pip install corsy",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        # ---------------- Screenshots ----------------
+        "gowitness": {
+            "check": ["gowitness", "-h"],
+            "install": "go install -v github.com/sensepost/gowitness@latest",
+            "required": False,
+            "category": "Screenshots",
+        },
+        "aquatone": {
+            "check": ["aquatone", "-h"],
+            "install": "Download from https://github.com/michenriksen/aquatone/releases",
+            "required": False,
+            "category": "Screenshots",
+        },
+        # ---------------- Cloud / sensitive info ----------------
+        "s3scanner": {
+            "check": ["s3scanner", "--version"],
+            "install": "pip install s3scanner",
+            "required": False,
+            "category": "Sensitive Information",
         },
     }
 
-    def __init__(self, logger=None):
-        self.logger = logger
-        self.available_tools = {}
-        self.missing_tools = {}
+    # Python packages required for the framework itself to run.
+    PYTHON_PACKAGES = {
+        "yaml": "pyyaml",
+        "requests": "requests",
+        "colorama": "colorama",
+    }
 
-    def check_tool(self, tool_name):
-        """Check if a single tool is available."""
-        if tool_name not in self.TOOLS:
+    PYTHON_PACKAGES_OPTIONAL = {
+        "dns": "dnspython",
+        "shodan": "shodan",
+        "tldextract": "tldextract",
+    }
+
+    def __init__(self, logger=None, runner=None):
+        self.logger = logger
+        self.runner = runner
+        self.available_tools: Dict[str, str] = {}
+        self.missing_tools: Dict[str, Dict] = {}
+        self.suspect_tools: Dict[str, str] = {}
+
+    # ------------------------------------------------------------------
+    def check_tool(self, tool_name: str) -> bool:
+        """Check whether a single tool is available and actually the right one."""
+        spec = self.TOOLS.get(tool_name)
+        if not spec:
             return False
 
         binary = tool_name
         path = shutil.which(binary)
-
-        if path:
-            self.available_tools[tool_name] = path
-            return True
-        else:
-            # Try running the check command
-            try:
-                result = subprocess.run(
-                    self.TOOLS[tool_name]['check'].split(),
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                if result.returncode == 0 or result.stdout or result.stderr:
-                    self.available_tools[tool_name] = tool_name
-                    return True
-            except Exception:
-                pass
-
-            self.missing_tools[tool_name] = self.TOOLS[tool_name]
+        if not path:
+            self.missing_tools[tool_name] = spec
             return False
 
-    def check_all(self):
-        """Check all tools and return status report."""
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}{'═' * 60}")
-        print(f"  🔧 Checking Tool Dependencies")
-        print(f"{'═' * 60}{Style.RESET_ALL}\n")
+        verify = spec.get("verify")
+        if verify:
+            output = self._run_check(spec["check"])
+            if output is not None and verify.lower() not in output.lower():
+                self.suspect_tools[tool_name] = path
+                self.missing_tools[tool_name] = spec
+                return False
 
-        categories = {}
-        for tool_name, tool_info in self.TOOLS.items():
-            cat = tool_info['category']
-            if cat not in categories:
-                categories[cat] = []
-            categories[cat].append(tool_name)
+        self.available_tools[tool_name] = path
+        return True
 
-        total = len(self.TOOLS)
+    def _run_check(self, argv: List[str]) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                argv, capture_output=True, text=True, timeout=15
+            )
+            return f"{result.stdout}\n{result.stderr}"
+        except Exception:
+            return None
+
+    def check_python_packages(self) -> Dict[str, bool]:
+        """Verify the Python dependencies SyncHunt itself needs."""
+        status = {}
+        for module, package in self.PYTHON_PACKAGES.items():
+            status[package] = importlib.util.find_spec(module) is not None
+        return status
+
+    def optional_python_packages(self) -> Dict[str, bool]:
+        status = {}
+        for module, package in self.PYTHON_PACKAGES_OPTIONAL.items():
+            status[package] = importlib.util.find_spec(module) is not None
+        return status
+
+    # ------------------------------------------------------------------
+    def check_all(self) -> Dict:
+        """Check all tools and print a status report."""
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}{'═' * 62}")
+        print("  🔧 Checking Tool Dependencies")
+        print(f"{'═' * 62}{Style.RESET_ALL}\n")
+
+        packages = self.check_python_packages()
+        print(f"  {Fore.YELLOW}{Style.BRIGHT}📦 Python packages{Style.RESET_ALL}")
+        missing_packages = []
+        for package, present in sorted(packages.items()):
+            if present:
+                print(f"    {Fore.GREEN}✅ FOUND    {Fore.WHITE}{package}")
+            else:
+                print(f"    {Fore.RED}❌ MISSING  {Fore.WHITE}{package}")
+                missing_packages.append(package)
+        print()
+
+        categories: Dict[str, List[str]] = {}
+        for tool_name, info in self.TOOLS.items():
+            categories.setdefault(info["category"], []).append(tool_name)
+
         available = 0
-        missing_required = []
-
-        for category, tools in sorted(categories.items()):
+        missing_required: List[str] = []
+        for category in sorted(categories):
             print(f"  {Fore.YELLOW}{Style.BRIGHT}📂 {category}{Style.RESET_ALL}")
-
-            for tool_name in tools:
-                is_available = self.check_tool(tool_name)
-                required = self.TOOLS[tool_name]['required']
-                req_tag = f"{Fore.RED}[REQUIRED]" if required else f"{Fore.WHITE}[OPTIONAL]"
-
-                if is_available:
+            for tool_name in sorted(categories[category]):
+                spec = self.TOOLS[tool_name]
+                present = self.check_tool(tool_name)
+                tag = f"{Fore.RED}[REQUIRED]" if spec["required"] else f"{Fore.WHITE}[OPTIONAL]"
+                if present:
                     available += 1
-                    status = f"{Fore.GREEN}✅ FOUND"
-                    path = self.available_tools.get(tool_name, '')
-                    print(f"    {status}  {Fore.WHITE}{tool_name:<20} {req_tag}{Style.RESET_ALL}")
+                    print(f"    {Fore.GREEN}✅ FOUND    {Fore.WHITE}{tool_name:<18} {tag}")
                 else:
-                    status = f"{Fore.RED}❌ MISSING"
-                    print(f"    {status} {Fore.WHITE}{tool_name:<20} {req_tag}{Style.RESET_ALL}")
-                    if required:
+                    suffix = ""
+                    if tool_name in self.suspect_tools:
+                        suffix = f" {Fore.YELLOW}(wrong binary: {self.suspect_tools[tool_name]})"
+                    print(f"    {Fore.RED}❌ MISSING  {Fore.WHITE}{tool_name:<18} {tag}{suffix}")
+                    if spec["required"]:
                         missing_required.append(tool_name)
-
             print()
 
-        # Summary
-        print(f"  {Fore.CYAN}{'─' * 50}")
+        total = len(self.TOOLS)
+        print(f"  {Fore.CYAN}{'─' * 52}")
         print(
-            f"  {Fore.WHITE}📊 Summary: "
-            f"{Fore.GREEN}{available}{Fore.WHITE}/{total} tools available"
+            f"  {Fore.WHITE}📊 Tools: {Fore.GREEN}{available}{Fore.WHITE}/{total} available"
         )
-
         if missing_required:
             print(
-                f"  {Fore.RED}⚠️  Missing REQUIRED tools: "
-                f"{', '.join(missing_required)}{Style.RESET_ALL}"
+                f"  {Fore.RED}⚠️  Missing REQUIRED tools: {', '.join(missing_required)}"
+                f"{Style.RESET_ALL}"
             )
 
         if self.missing_tools:
             print(f"\n  {Fore.YELLOW}📋 Install missing tools:{Style.RESET_ALL}")
-            for tool_name, info in self.missing_tools.items():
-                print(f"    {Fore.WHITE}• {tool_name}: {Fore.CYAN}{info['install']}{Style.RESET_ALL}")
-
-        print(f"\n{Fore.CYAN}{'═' * 60}{Style.RESET_ALL}\n")
+            for tool_name in sorted(self.missing_tools):
+                info = self.missing_tools[tool_name]
+                print(f"    {Fore.WHITE}• {tool_name:<18} {Fore.CYAN}{info['install']}")
+        print(f"\n{Fore.CYAN}{'═' * 62}{Style.RESET_ALL}\n")
 
         return {
-            'available': self.available_tools,
-            'missing': self.missing_tools,
-            'missing_required': missing_required,
-            'total': total,
-            'available_count': available,
-            'ready': len(missing_required) == 0
+            "available": dict(self.available_tools),
+            "missing": dict(self.missing_tools),
+            "missing_required": missing_required,
+            "missing_packages": missing_packages,
+            "suspect": dict(self.suspect_tools),
+            "total": total,
+            "available_count": available,
+            "ready": not missing_required,
         }
 
-    def is_available(self, tool_name):
-        """Quick check if a tool is available."""
+    def is_available(self, tool_name: str) -> bool:
         if tool_name in self.available_tools:
             return True
         return self.check_tool(tool_name)
 
-    def get_install_commands(self):
-        """Get all install commands for missing tools."""
-        commands = []
-        for tool_name, info in self.missing_tools.items():
-            commands.append({
-                'tool': tool_name,
-                'command': info['install'],
-                'category': info['category']
-            })
-        return commands
+    def get_install_commands(self) -> List[Dict[str, str]]:
+        return [
+            {
+                "tool": name,
+                "command": info["install"],
+                "category": info["category"],
+            }
+            for name, info in sorted(self.missing_tools.items())
+        ]
 
-    def auto_install(self, tool_name=None):
-        """Attempt to automatically install missing tools."""
-        tools_to_install = {}
-        if tool_name:
-            if tool_name in self.missing_tools:
-                tools_to_install[tool_name] = self.missing_tools[tool_name]
-        else:
-            tools_to_install = self.missing_tools.copy()
+    def auto_install(self, tool_name: Optional[str] = None) -> Dict[str, bool]:
+        """
+        Print install commands for missing tools.
 
+        SyncHunt deliberately does not execute package-manager commands on the
+        user's behalf: silently running `sudo apt install` / `pip install` from
+        a scanner is a supply-chain risk and often hangs on a password prompt.
+        """
+        targets = (
+            {tool_name: self.missing_tools.get(tool_name, {})}
+            if tool_name
+            else self.missing_tools
+        )
         results = {}
-        for name, info in tools_to_install.items():
-            install_cmd = info['install']
-            print(f"  {Fore.YELLOW}Installing {name}...{Style.RESET_ALL}")
-
-            try:
-                result = subprocess.run(
-                    install_cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=120
-                )
-                if result.returncode == 0:
-                    print(f"  {Fore.GREEN}✅ {name} installed successfully{Style.RESET_ALL}")
-                    results[name] = True
-                else:
-                    print(f"  {Fore.RED}❌ {name} installation failed{Style.RESET_ALL}")
-                    results[name] = False
-            except Exception as e:
-                print(f"  {Fore.RED}❌ {name} installation error: {e}{Style.RESET_ALL}")
+        for name, info in targets.items():
+            command = (info or {}).get("install")
+            if not command:
                 results[name] = False
-
+                continue
+            print(
+                f"  {Fore.YELLOW}→ install {name}: {Fore.CYAN}{command}{Style.RESET_ALL}"
+            )
+            results[name] = False
+        if results:
+            print(
+                f"\n  {Fore.WHITE}Run the commands above, then re-run "
+                f"`synchunt --doctor`.{Style.RESET_ALL}"
+            )
         return results

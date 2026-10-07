@@ -1,351 +1,334 @@
 """
-BugHuntRecon - HTML Report Generator
-Generates a comprehensive HTML report of all findings.
+SyncHunt - HTML Report Generator
+
+Every value that comes from scan output (URLs, titles, evidence) is escaped
+before it is embedded: findings are attacker-influenced data, and a report
+that executes injected script is itself a vulnerability.
 """
 
+from __future__ import annotations
+
+import html
 import os
 from datetime import datetime
-from core.utils import read_file_lines, get_file_count, load_json
+from typing import Dict, List, Optional
+
+from core.models import Finding
+from core.utils import (
+    format_duration,
+    load_json,
+    read_file_lines,
+    truncate,
+)
 
 
 class HTMLReportGenerator:
-    """Generate beautiful HTML reports."""
+    """Generate a self-contained HTML report."""
 
-    def __init__(self, output_dir, target, scan_start, scan_end):
+    def __init__(self, output_dir, target, scan_start, scan_end,
+                 database=None, scan_id=None, findings: Optional[List[Finding]] = None):
         self.output_dir = output_dir
         self.target = target
         self.scan_start = scan_start
         self.scan_end = scan_end
+        self.database = database
+        self.scan_id = scan_id
+        self._findings = findings
         self.report_dir = os.path.join(output_dir, "reports")
         os.makedirs(self.report_dir, exist_ok=True)
 
-    def generate(self):
-        """Generate the full HTML report."""
+    # ------------------------------------------------------------------
+    def generate(self) -> str:
         report_path = os.path.join(self.report_dir, "report.html")
-
-        # Gather all data
         data = self._gather_data()
-
-        # Generate HTML
-        html = self._build_html(data)
-
-        with open(report_path, 'w') as f:
-            f.write(html)
-
+        with open(report_path, "w") as fh:
+            fh.write(self._build_html(data))
         return report_path
 
-    def _gather_data(self):
-        """Gather all scan data for the report."""
+    # ------------------------------------------------------------------
+    def _findings_list(self) -> List[Dict]:
+        if self._findings:
+            return [f.to_dict() | {"priority": f.extra.get("priority", "")} for f in self._findings]
+        if self.database is not None and self.scan_id is not None:
+            try:
+                rows = self.database.findings(self.scan_id)
+                if rows:
+                    return [
+                        f.to_dict() | {"priority": f.extra.get("priority", "")}
+                        for f in rows
+                    ]
+            except Exception:  # pragma: no cover - defensive
+                pass
+        path = os.path.join(self.output_dir, "findings_prioritized", "findings.json")
+        data = load_json(path, [])
+        return data if isinstance(data, list) else []
+
+    def _gather_data(self) -> Dict:
+        findings = self._findings_list()
+        severity_counts: Dict[str, int] = {level: 0 for level in
+                                          ("critical", "high", "medium", "low", "info")}
+        priority_counts: Dict[str, int] = {"P1": 0, "P2": 0, "P3": 0, "P4": 0}
+        for finding in findings:
+            severity = (finding.get("severity") or "info").lower()
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+            priority = finding.get("priority") or ""
+            if priority in priority_counts:
+                priority_counts[priority] += 1
+
+        duration = "N/A"
+        if self.scan_end and self.scan_start:
+            duration = format_duration((self.scan_end - self.scan_start).total_seconds())
+
+        def _lines(*parts) -> List[str]:
+            path = os.path.join(self.output_dir, *parts)
+            return read_file_lines(path) if os.path.exists(path) else []
+
         data = {
-            'target': self.target,
-            'scan_start': self.scan_start,
-            'scan_end': self.scan_end,
-            'duration': str(self.scan_end - self.scan_start) if self.scan_end and self.scan_start else 'N/A',
+            "target": self.target,
+            "scan_start": self.scan_start,
+            "scan_end": self.scan_end,
+            "duration": duration,
+            "generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "findings": findings,
+            "severity": severity_counts,
+            "priority": priority_counts,
+            "finding_count": len(findings),
+            "subdomains": _lines("subdomains", "all_subdomains.txt"),
+            "live_hosts": _lines("dns", "live_hosts.txt"),
+            "open_ports": _lines("ports", "all_ports.txt"),
+            "urls": _lines("content_discovery", "all_urls.txt"),
+            "js_files": _lines("content_discovery", "js_files.txt"),
+            "api_endpoints": _lines("api_intelligence", "endpoints.txt"),
+            "public_buckets": _lines("cloud_enum", "public_buckets.txt"),
+            "interesting_paths": _lines("intel", "interesting_paths.txt"),
+            "secrets": _lines("js_analysis", "secrets", "custom_regex.txt")
+            + _lines("js_analysis", "secrets", "secretfinder.txt"),
         }
-
-        # Subdomains
-        sub_file = os.path.join(self.output_dir, "subdomains", "all_subdomains.txt")
-        data['subdomains'] = read_file_lines(sub_file) if os.path.exists(sub_file) else []
-        data['subdomain_count'] = len(data['subdomains'])
-
-        # Live hosts
-        live_file = os.path.join(self.output_dir, "dns", "live_hosts.txt")
-        data['live_hosts'] = read_file_lines(live_file) if os.path.exists(live_file) else []
-        data['live_host_count'] = len(data['live_hosts'])
-
-        # Ports
-        ports_file = os.path.join(self.output_dir, "ports", "all_ports.txt")
-        data['open_ports'] = read_file_lines(ports_file) if os.path.exists(ports_file) else []
-        data['port_count'] = len(data['open_ports'])
-
-        # URLs
-        urls_file = os.path.join(self.output_dir, "content_discovery", "all_urls.txt")
-        data['urls'] = read_file_lines(urls_file) if os.path.exists(urls_file) else []
-        data['url_count'] = len(data['urls'])
-
-        # JS files
-        js_file = os.path.join(self.output_dir, "content_discovery", "js_files.txt")
-        data['js_files'] = read_file_lines(js_file) if os.path.exists(js_file) else []
-        data['js_count'] = len(data['js_files'])
-
-        # Vulnerabilities
-        vuln_dir = os.path.join(self.output_dir, "vulnerabilities")
-        data['vulnerabilities'] = []
-        if os.path.exists(vuln_dir):
-            for root, dirs, files in os.walk(vuln_dir):
-                for f in files:
-                    if f.endswith('.txt'):
-                        vulns = read_file_lines(os.path.join(root, f))
-                        data['vulnerabilities'].extend(vulns)
-        data['vuln_count'] = len(data['vulnerabilities'])
-
-        # JS Secrets
-        secrets_dir = os.path.join(self.output_dir, "js_analysis", "secrets")
-        data['secrets'] = []
-        if os.path.exists(secrets_dir):
-            for f in os.listdir(secrets_dir):
-                if f.endswith('.txt'):
-                    data['secrets'].extend(
-                        read_file_lines(os.path.join(secrets_dir, f))
-                    )
-        data['secret_count'] = len(data['secrets'])
-
+        data["url_count"] = len(data["urls"])
         return data
 
-    def _build_html(self, data):
-        """Build the HTML report string."""
-        html = f"""<!DOCTYPE html>
+    # ------------------------------------------------------------------
+    def _build_html(self, data: Dict) -> str:
+        e = html.escape
+
+        def _stat(number, label, css_class: str = "") -> str:
+            return (
+                f'<div class="stat-card {css_class}">'
+                f'<div class="number">{e(str(number))}</div>'
+                f'<div class="label">{e(label)}</div></div>'
+            )
+
+        def _list(items, limit=500, links=False, empty="nothing found") -> str:
+            items = items[:limit]
+            if not items:
+                return f'<div class="item muted">{e(empty)}</div>'
+            chunks = []
+            for item in items:
+                safe = e(str(item))
+                if links and str(item).startswith(("http://", "https://")):
+                    chunks.append(
+                        f'<div class="item"><a href="{safe}" rel="noopener noreferrer" '
+                        f'target="_blank">{safe}</a></div>'
+                    )
+                else:
+                    chunks.append(f'<div class="item">{safe}</div>')
+            return "".join(chunks)
+
+        def _findings_rows(findings, limit=200) -> str:
+            if not findings:
+                return '<div class="item muted">no findings</div>'
+            rows = []
+            for finding in findings[:limit]:
+                severity = str(finding.get("severity") or "info").lower()
+                priority = str(finding.get("priority") or "")
+                reasons = finding.get("score_reasons") or ""
+                if isinstance(reasons, list):
+                    reasons = ", ".join(str(r) for r in reasons)
+                try:
+                    score = round(float(finding.get("score") or 0), 2)
+                except (TypeError, ValueError):
+                    score = 0.0
+
+                parts = [
+                    f'<div class="vuln-item vuln-{e(severity)}">',
+                    '<div class="vuln-head">',
+                    f'<span class="badge">{e(severity.upper())}</span>',
+                ]
+                if priority:
+                    parts.append(f'<span class="badge prio">{e(priority)}</span>')
+                parts.append(f'<span class="score">{score}</span>')
+                parts.append(f'<span class="vuln-title">{e(str(finding.get("title") or ""))}</span>')
+                parts.append("</div>")
+
+                meta = [e(str(finding.get("category") or ""))]
+                if finding.get("url"):
+                    meta.append(e(str(finding["url"])))
+                if finding.get("source"):
+                    meta.append("source: " + e(str(finding["source"])))
+                parts.append('<div class="vuln-meta">' + " · ".join(meta) + "</div>")
+
+                if reasons:
+                    parts.append(f'<div class="vuln-why">why: {e(str(reasons))}</div>')
+                if finding.get("evidence"):
+                    evidence = truncate(str(finding["evidence"]), 600)
+                    parts.append(f'<pre class="evidence">{e(evidence)}</pre>')
+                parts.append("</div>")
+                rows.append("".join(parts))
+            return "".join(rows)
+
+        severity = data["severity"]
+        priority = data["priority"]
+
+        return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BugHuntRecon Report - {data['target']}</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #0a0a0a;
-            color: #e0e0e0;
-            line-height: 1.6;
-        }}
-        .container {{ max-width: 1400px; margin: 0 auto; padding: 20px; }}
-        .header {{
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            padding: 40px;
-            border-radius: 15px;
-            margin-bottom: 30px;
-            border: 1px solid #333;
-            text-align: center;
-        }}
-        .header h1 {{
-            color: #00ff88;
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }}
-        .header .target {{
-            color: #ff6b6b;
-            font-size: 1.5em;
-        }}
-        .header .meta {{
-            color: #888;
-            margin-top: 15px;
-        }}
-        .stats-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }}
-        .stat-card {{
-            background: #1a1a2e;
-            padding: 25px;
-            border-radius: 12px;
-            text-align: center;
-            border: 1px solid #333;
-            transition: transform 0.2s;
-        }}
-        .stat-card:hover {{ transform: translateY(-5px); }}
-        .stat-card .number {{
-            font-size: 2.5em;
-            font-weight: bold;
-            color: #00ff88;
-        }}
-        .stat-card .label {{
-            color: #888;
-            font-size: 0.9em;
-            margin-top: 5px;
-        }}
-        .stat-card.critical .number {{ color: #ff4444; }}
-        .stat-card.warning .number {{ color: #ffaa00; }}
-        .section {{
-            background: #1a1a2e;
-            padding: 30px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            border: 1px solid #333;
-        }}
-        .section h2 {{
-            color: #00ff88;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #333;
-        }}
-        .data-list {{
-            max-height: 400px;
-            overflow-y: auto;
-            background: #0a0a0a;
-            padding: 15px;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.85em;
-        }}
-        .data-list .item {{
-            padding: 5px 10px;
-            border-bottom: 1px solid #222;
-            word-break: break-all;
-        }}
-        .data-list .item:hover {{
-            background: #1a1a2e;
-        }}
-        .vuln-item {{
-            padding: 10px 15px;
-            margin: 5px 0;
-            border-radius: 6px;
-            border-left: 4px solid;
-        }}
-        .vuln-critical {{
-            background: rgba(255, 0, 0, 0.1);
-            border-color: #ff0000;
-        }}
-        .vuln-high {{
-            background: rgba(255, 68, 68, 0.1);
-            border-color: #ff4444;
-        }}
-        .vuln-medium {{
-            background: rgba(255, 170, 0, 0.1);
-            border-color: #ffaa00;
-        }}
-        .vuln-low {{
-            background: rgba(0, 255, 136, 0.1);
-            border-color: #00ff88;
-        }}
-        .vuln-info {{
-            background: rgba(0, 136, 255, 0.1);
-            border-color: #0088ff;
-        }}
-        .footer {{
-            text-align: center;
-            padding: 20px;
-            color: #555;
-        }}
-        ::-webkit-scrollbar {{ width: 8px; }}
-        ::-webkit-scrollbar-track {{ background: #0a0a0a; }}
-        ::-webkit-scrollbar-thumb {{ background: #333; border-radius: 4px; }}
-        .search-box {{
-            width: 100%;
-            padding: 12px;
-            background: #0a0a0a;
-            border: 1px solid #333;
-            color: #e0e0e0;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 1em;
-        }}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;">
+<title>SyncHunt Report - {e(str(data['target']))}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: 'Segoe UI', Tahoma, Verdana, sans-serif; background: #0a0a0f;
+         color: #e6e6f0; line-height: 1.55; }}
+  .container {{ max-width: 1280px; margin: 0 auto; padding: 24px; }}
+  .header {{ background: linear-gradient(135deg, #14142b, #0f1b2d); padding: 32px;
+             border-radius: 14px; margin-bottom: 24px; border: 1px solid #26264a;
+             text-align: center; }}
+  .header h1 {{ color: #4ade80; font-size: 2.1em; margin-bottom: 8px; }}
+  .header .target {{ color: #f87171; font-size: 1.35em; word-break: break-all; }}
+  .header .meta {{ color: #8b8ba7; margin-top: 12px; font-size: .92em; }}
+  .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                 gap: 14px; margin-bottom: 24px; }}
+  .stat-card {{ background: #14142b; padding: 18px 12px; border-radius: 10px;
+                text-align: center; border: 1px solid #26264a; }}
+  .stat-card .number {{ font-size: 1.9em; font-weight: 700; color: #4ade80; }}
+  .stat-card .label {{ color: #8b8ba7; font-size: .82em; margin-top: 4px;
+                       text-transform: uppercase; letter-spacing: .04em; }}
+  .stat-card.critical .number {{ color: #ef4444; }}
+  .stat-card.high .number {{ color: #f97316; }}
+  .stat-card.medium .number {{ color: #eab308; }}
+  .stat-card.warning .number {{ color: #f59e0b; }}
+  .section {{ background: #12122a; padding: 22px; border-radius: 12px;
+              margin-bottom: 18px; border: 1px solid #26264a; }}
+  .section h2 {{ color: #4ade80; font-size: 1.15em; margin-bottom: 14px;
+                 padding-bottom: 8px; border-bottom: 1px solid #26264a; }}
+  .data-list {{ max-height: 380px; overflow-y: auto; background: #0a0a0f;
+                padding: 12px; border-radius: 8px; font-family: ui-monospace, Menlo, monospace;
+                font-size: .84em; }}
+  .data-list .item {{ padding: 4px 8px; border-bottom: 1px solid #1c1c30;
+                      word-break: break-all; }}
+  .data-list a {{ color: #6ee7b7; text-decoration: none; }}
+  .muted {{ color: #6b6b85; }}
+  .vuln-item {{ padding: 10px 12px; margin: 6px 0; border-radius: 8px;
+                border-left: 4px solid #6b7280; background: #16162e; }}
+  .vuln-head {{ display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }}
+  .badge {{ font-size: .68em; padding: 2px 7px; border-radius: 999px;
+            background: #26264a; color: #cbd5f5; letter-spacing: .03em; }}
+  .badge.prio {{ background: #3b2f63; color: #e9d5ff; }}
+  .score {{ font-family: ui-monospace, monospace; color: #93c5fd; font-size: .8em; }}
+  .vuln-title {{ font-weight: 600; }}
+  .vuln-meta {{ color: #8b8ba7; font-size: .8em; margin-top: 3px; word-break: break-all; }}
+  .vuln-why {{ color: #a5b4fc; font-size: .78em; margin-top: 3px; }}
+  .evidence {{ background: #0a0a0f; padding: 8px; border-radius: 6px; margin-top: 6px;
+               font-size: .78em; color: #c9d1d9; white-space: pre-wrap;
+               word-break: break-all; max-height: 180px; overflow: auto; }}
+  .vuln-critical {{ border-color: #ef4444; }}
+  .vuln-high {{ border-color: #f97316; }}
+  .vuln-medium {{ border-color: #eab308; }}
+  .vuln-low {{ border-color: #4ade80; }}
+  .vuln-info {{ border-color: #38bdf8; }}
+  .search-box {{ width: 100%; padding: 10px; background: #0a0a0f; border: 1px solid #26264a;
+                 color: #e6e6f0; border-radius: 8px; margin-bottom: 12px; }}
+  .footer {{ text-align: center; padding: 18px; color: #55556e; font-size: .85em; }}
+</style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔥 BugHuntRecon Report</h1>
-            <div class="target">Target: {data['target']}</div>
-            <div class="meta">
-                Scan Start: {data['scan_start']} |
-                Duration: {data['duration']}
-            </div>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="number">{data['subdomain_count']}</div>
-                <div class="label">Subdomains</div>
-            </div>
-            <div class="stat-card">
-                <div class="number">{data['live_host_count']}</div>
-                <div class="label">Live Hosts</div>
-            </div>
-            <div class="stat-card">
-                <div class="number">{data['port_count']}</div>
-                <div class="label">Open Ports</div>
-            </div>
-            <div class="stat-card">
-                <div class="number">{data['url_count']}</div>
-                <div class="label">URLs Discovered</div>
-            </div>
-            <div class="stat-card">
-                <div class="number">{data['js_count']}</div>
-                <div class="label">JS Files</div>
-            </div>
-            <div class="stat-card critical">
-                <div class="number">{data['vuln_count']}</div>
-                <div class="label">Vulnerabilities</div>
-            </div>
-            <div class="stat-card warning">
-                <div class="number">{data['secret_count']}</div>
-                <div class="label">Secrets Found</div>
-            </div>
-        </div>
-
-        <!-- Vulnerabilities Section -->
-        <div class="section">
-            <h2>🚨 Vulnerabilities ({data['vuln_count']})</h2>
-            <div class="data-list">
-                {''.join(f'<div class="vuln-item {self._get_vuln_class(v)}">{v}</div>' for v in data['vulnerabilities'][:200]) or '<div class="item">No vulnerabilities found</div>'}
-            </div>
-        </div>
-
-        <!-- Secrets Section -->
-        <div class="section">
-            <h2>🔑 Secrets & Sensitive Data ({data['secret_count']})</h2>
-            <div class="data-list">
-                {''.join(f'<div class="vuln-item vuln-high">{s}</div>' for s in data['secrets'][:100]) or '<div class="item">No secrets found</div>'}
-            </div>
-        </div>
-
-        <!-- Subdomains Section -->
-        <div class="section">
-            <h2>🌐 Subdomains ({data['subdomain_count']})</h2>
-            <input type="text" class="search-box" placeholder="Search subdomains..." onkeyup="filterList(this, 'subdomain-list')">
-            <div class="data-list" id="subdomain-list">
-                {''.join(f'<div class="item">{s}</div>' for s in data['subdomains'][:500])}
-            </div>
-        </div>
-
-        <!-- Live Hosts Section -->
-        <div class="section">
-            <h2>✅ Live Hosts ({data['live_host_count']})</h2>
-            <div class="data-list">
-                {''.join(f'<div class="item"><a href="{h}" target="_blank" style="color: #00ff88; text-decoration: none;">{h}</a></div>' for h in data['live_hosts'][:500])}
-            </div>
-        </div>
-
-        <!-- Open Ports Section -->
-        <div class="section">
-            <h2>🔓 Open Ports ({data['port_count']})</h2>
-            <div class="data-list">
-                {''.join(f'<div class="item">{p}</div>' for p in data['open_ports'][:500])}
-            </div>
-        </div>
-
-        <div class="footer">
-            <p>Generated by BugHuntRecon | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-        </div>
+<div class="container">
+  <div class="header">
+    <h1>🔎 SyncHunt Report</h1>
+    <div class="target">{e(str(data['target']))}</div>
+    <div class="meta">
+      Scan start: {e(str(data['scan_start']))} · Duration: {e(data['duration'])}<br>
+      Generated {e(data['generated'])} · Authorised testing only
     </div>
+  </div>
 
-    <script>
-        function filterList(input, listId) {{
-            const filter = input.value.toLowerCase();
-            const list = document.getElementById(listId);
-            const items = list.getElementsByClassName('item');
-            for (let i = 0; i < items.length; i++) {{
-                const text = items[i].textContent.toLowerCase();
-                items[i].style.display = text.includes(filter) ? '' : 'none';
-            }}
-        }}
-    </script>
+  <div class="stats-grid">
+    {_stat(data['finding_count'], 'Total findings', 'critical')}
+    {_stat(severity.get('critical', 0), 'Critical', 'critical')}
+    {_stat(severity.get('high', 0), 'High', 'high')}
+    {_stat(severity.get('medium', 0), 'Medium', 'medium')}
+    {_stat(priority.get('P1', 0), 'Priority 1', 'warning')}
+    {_stat(len(data['subdomains']), 'Subdomains')}
+    {_stat(len(data['live_hosts']), 'Live hosts')}
+    {_stat(len(data['open_ports']), 'Open ports')}
+    {_stat(data['url_count'], 'URLs')}
+    {_stat(len(data['api_endpoints']), 'API endpoints')}
+    {_stat(len(data['public_buckets']), 'Public buckets', 'critical')}
+    {_stat(len(data['secrets']), 'Secrets', 'warning')}
+  </div>
+
+  <div class="section">
+    <h2>🎯 Prioritised findings ({data['finding_count']})</h2>
+    <input type="text" class="search-box" placeholder="Filter findings..."
+           onkeyup="filterList(this, 'findings-list')">
+    <div id="findings-list" class="data-list" style="max-height:640px">
+      {_findings_rows(data['findings'])}
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>🛰️ Exposed management / interesting paths ({len(data['interesting_paths'])})</h2>
+    <div class="data-list">{_list(data['interesting_paths'], 200, links=True)}</div>
+  </div>
+
+  <div class="section">
+    <h2>🔌 API endpoints ({len(data['api_endpoints'])})</h2>
+    <div class="data-list">{_list(data['api_endpoints'], 400, links=True)}</div>
+  </div>
+
+  <div class="section">
+    <h2>☁️ Public cloud buckets ({len(data['public_buckets'])})</h2>
+    <div class="data-list">{_list(data['public_buckets'], 100, links=True)}</div>
+  </div>
+
+  <div class="section">
+    <h2>🌐 Subdomains ({len(data['subdomains'])})</h2>
+    <input type="text" class="search-box" placeholder="Filter subdomains..."
+           onkeyup="filterList(this, 'subdomain-list')">
+    <div class="data-list" id="subdomain-list">{_list(data['subdomains'], 1000)}</div>
+  </div>
+
+  <div class="section">
+    <h2>✅ Live hosts ({len(data['live_hosts'])})</h2>
+    <div class="data-list">{_list(data['live_hosts'], 500, links=True)}</div>
+  </div>
+
+  <div class="section">
+    <h2>🔓 Open ports ({len(data['open_ports'])})</h2>
+    <div class="data-list">{_list(data['open_ports'], 500)}</div>
+  </div>
+
+  <div class="section">
+    <h2>📜 JavaScript files ({len(data['js_files'])})</h2>
+    <div class="data-list">{_list(data['js_files'], 300, links=True)}</div>
+  </div>
+
+  <div class="footer">
+    Generated by SyncHunt · findings are heuristic and require manual verification
+  </div>
+</div>
+<script>
+function filterList(input, listId) {{
+  const filter = (input.value || '').toLowerCase();
+  const list = document.getElementById(listId);
+  if (!list) return;
+  const items = list.getElementsByClassName('item');
+  for (let i = 0; i < items.length; i++) {{
+    const text = (items[i].textContent || '').toLowerCase();
+    items[i].style.display = text.includes(filter) ? '' : 'none';
+  }}
+}}
+</script>
 </body>
 </html>"""
-        return html
-
-    def _get_vuln_class(self, vuln_text):
-        """Determine CSS class based on vulnerability severity."""
-        vuln_lower = vuln_text.lower()
-        if 'critical' in vuln_lower:
-            return 'vuln-critical'
-        elif 'high' in vuln_lower:
-            return 'vuln-high'
-        elif 'medium' in vuln_lower:
-            return 'vuln-medium'
-        elif 'low' in vuln_lower:
-            return 'vuln-low'
-        else:
-            return 'vuln-info'

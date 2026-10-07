@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Byte-compile everything
+        run: python -m compileall -q core modules reports main.py
+
+      - name: Static checks (pyflakes)
+        run: python -m pyflakes core modules reports main.py tests
+
+      - name: Unit + integration tests
+        run: python -m pytest tests -q
+
+      - name: CLI smoke test
+        run: |
+          python main.py --list-phases
+          python main.py --check-deps || true
+          python main.py -d example.com --dry-run --output-dir /tmp/synchunt-ci

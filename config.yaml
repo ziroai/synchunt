@@ -1,31 +1,31 @@
 # ============================================
-# Synchunt - Advanced Recon Configuration
+# SyncHunt - Configuration
 # ============================================
+# Every section maps to a phase in main.py. Profiles select which phases run;
+# the per-tool blocks control how.
 
 general:
-  profile: "balanced"             # quick | balanced | full | deep
-  threads: 50
-  timeout: 30
-  rate_limit: 150
+  profile: "balanced"            # quick | balanced | full | deep
+  threads: 50                    # worker threads for built-in probers
+  timeout: 30                    # per-tool / per-request timeout (seconds)
+  rate_limit: 50                 # HTTP requests per second (shared token bucket)
+  resolve_timeout: 5             # DNS timeout (seconds)
+  retry: 2                       # HTTP retries
   user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-  resolve_timeout: 5
-  retry: 3
   verbose: true
-  resume: true
-  auto_resume: true
   output_dir: "output"
-  scope_file: ""
-  out_of_scope_file: ""
-  dry_run: false
-  parallel_workers: 8
+  scope_file: ""                 # file of in-scope entries
+  out_of_scope_file: ""          # file of excluded entries
 
+# ------------------------------------------------------------------
+# Profiles select phases. Phase names must exist in main.py PHASES.
+# ------------------------------------------------------------------
 profiles:
   quick:
     phases:
       - subdomain
       - validation
       - enrichment
-      - content
       - report
   balanced:
     phases:
@@ -34,13 +34,10 @@ profiles:
       - enrichment
       - portscan
       - fingerprint
-      - github_recon
       - content
       - api_discovery
       - jsanalysis
-      - cloud_enum
       - vulnscan
-      - sensitive
       - prioritize
       - report
   full:
@@ -57,7 +54,6 @@ profiles:
       - cloud_enum
       - vulnscan
       - sensitive
-      - screenshot
       - prioritize
       - report
   deep:
@@ -78,6 +74,17 @@ profiles:
       - prioritize
       - report
 
+# ------------------------------------------------------------------
+# Scope enforcement (in addition to --scope-file / --out-of-scope-file)
+# ------------------------------------------------------------------
+scope:
+  include: []                    # e.g. ["example.com", "*.example.com", "10.0.0.0/24"]
+  exclude: []                    # e.g. ["blog.example.com", "internal.example.com"]
+  strict: false                  # true = require an explicit include rule
+
+# ------------------------------------------------------------------
+# Phase 1 - Subdomain enumeration
+# ------------------------------------------------------------------
 subdomain_enum:
   enabled: true
   subfinder:
@@ -96,7 +103,6 @@ subdomain_enum:
     subs_only: true
   findomain:
     enabled: true
-    threads: 30
   crtsh:
     enabled: true
   sublist3r:
@@ -104,14 +110,16 @@ subdomain_enum:
     threads: 30
   puredns:
     enabled: true
-    wordlist: "wordlists/resolvers.txt"
+    wordlist: "wordlists/subdomains.txt"
     resolvers: "wordlists/resolvers.txt"
   gotator:
     enabled: true
     permutations: "wordlists/permutations.txt"
     depth: 1
-    threads: 100
 
+# ------------------------------------------------------------------
+# Phase 2 - Validation
+# ------------------------------------------------------------------
 subdomain_validation:
   enabled: true
   httpx:
@@ -119,29 +127,37 @@ subdomain_validation:
     threads: 50
     timeout: 10
     follow_redirects: true
-    status_code: true
-    title: true
-    tech_detect: true
-    content_length: true
-    web_server: true
   dnsx:
     enabled: true
     threads: 100
-    wordlist: ""
-    resp: true
-  massdns:
-    enabled: true
-    resolvers: "wordlists/resolvers.txt"
-    rate: 500
 
+# ------------------------------------------------------------------
+# Phase 3 - Asset enrichment
+# ------------------------------------------------------------------
 asset_enrichment:
   enabled: true
   max_hosts: 150
   probe_admin_paths: true
-  dns_cache: true
-  tech_hints: true
-  exposure_hints: true
+  report_header_issues: true
+  admin_paths:
+    - "/admin"
+    - "/admin/login"
+    - "/login"
+    - "/wp-admin"
+    - "/wp-login.php"
+    - "/manager/html"
+    - "/phpmyadmin"
+    - "/.git/config"
+    - "/.env"
+    - "/server-status"
+    - "/actuator/env"
+    - "/metrics"
+    - "/console"
+    - "/debug"
 
+# ------------------------------------------------------------------
+# Phase 4 - Port scanning
+# ------------------------------------------------------------------
 port_scanning:
   enabled: true
   naabu:
@@ -149,7 +165,7 @@ port_scanning:
     top_ports: 1000
     rate: 5000
     threads: 25
-    scan_type: "s"
+    scan_type: "s"               # "s" needs root; SyncHunt retries with "c"
   nmap:
     enabled: true
     scan_type: "-sV -sC"
@@ -157,9 +173,13 @@ port_scanning:
     timing: "T4"
   masscan:
     enabled: false
+    allow_root: false            # SyncHunt never calls sudo itself
     rate: 10000
     ports: "1-65535"
 
+# ------------------------------------------------------------------
+# Phase 5 - Fingerprinting
+# ------------------------------------------------------------------
 fingerprinting:
   enabled: true
   whatweb:
@@ -170,6 +190,32 @@ fingerprinting:
   webanalyze:
     enabled: true
 
+# ------------------------------------------------------------------
+# Phase 6 - GitHub reconnaissance
+# ------------------------------------------------------------------
+github_recon:
+  enabled: true
+  token: ""                      # or export GITHUB_TOKEN
+  org: ""                        # optional organisation name
+  max_repos: 10
+  max_issues: 10
+  max_pages: 2
+  search_code: true              # requires a token
+  dorks:
+    - "password"
+    - "secret"
+    - "api_key"
+    - "apikey"
+    - "access_token"
+    - "auth_token"
+    - "credentials"
+    - "db_password"
+    - "private_key"
+    - "BEGIN RSA PRIVATE KEY"
+
+# ------------------------------------------------------------------
+# Phase 7 - Content discovery
+# ------------------------------------------------------------------
 content_discovery:
   enabled: true
   waybackurls:
@@ -194,17 +240,17 @@ content_discovery:
     enabled: true
   dirsearch:
     enabled: true
-    wordlist: "wordlists/common.txt"
+    wordlist: "wordlists/directories.txt"
     threads: 30
-    extensions: "php,asp,aspx,jsp,html,js,json,xml,txt,bak,old,conf,config,env,yml,yaml,toml,sql,db,log"
+    extensions: "php,asp,aspx,jsp,html,js,json,xml,txt,bak,old,conf,config,env,yml,yaml,sql,log"
   feroxbuster:
     enabled: true
-    wordlist: "wordlists/raft-medium-directories.txt"
+    wordlist: "wordlists/directories.txt"
     threads: 50
     depth: 2
   ffuf:
     enabled: true
-    wordlist: "wordlists/raft-medium-directories.txt"
+    wordlist: "wordlists/directories.txt"
     threads: 40
     extensions: "php,asp,html,js,json,txt"
   x8:
@@ -212,66 +258,61 @@ content_discovery:
     wordlist: "wordlists/parameters.txt"
     threads: 20
 
+# ------------------------------------------------------------------
+# Phase 8 - API discovery
+# ------------------------------------------------------------------
 api_introspection:
   enabled: true
   max_hosts: 100
-  common_paths:
-    - "/graphql"
-    - "/swagger.json"
-    - "/swagger-ui.html"
-    - "/openapi.json"
-    - "/api/docs"
-    - "/actuator"
-    - "/health"
+  graphql: true
+  actuator: true
+  report_health: false           # /health,/metrics,/status are recorded as assets only
 
+# ------------------------------------------------------------------
+# Phase 9 - JavaScript analysis
+# ------------------------------------------------------------------
 js_analysis:
   enabled: true
+  max_files: 200
+  check_sourcemaps: true
   linkfinder:
     enabled: true
   secretfinder:
     enabled: true
+  # Extra regex patterns merged with the built-in library (core/secrets.py).
+  # Built-in patterns already cover AWS/GCP/Slack/Stripe/JWT/private keys/etc.
   custom_regex:
     enabled: true
     patterns:
-      - name: "AWS Key"
-        regex: "AKIA[0-9A-Z]{16}"
-      - name: "Google API Key"
-        regex: "AIza[0-9A-Za-z\\-_]{35}"
-      - name: "Slack Token"
-        regex: "xox[baprs]-[0-9a-zA-Z]{10,48}"
-      - name: "Private Key"
-        regex: "-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----"
-      - name: "Authorization Bearer"
-        regex: "[Bb]earer\\s+[a-zA-Z0-9_\\-\\.=]+"
-      - name: "JWT Token"
-        regex: "eyJ[A-Za-z0-9-_=]+\\.eyJ[A-Za-z0-9-_=]+\\.[A-Za-z0-9-_.+/=]*"
-      - name: "Generic API Key"
-        regex: "[Aa]pi[_-]?[Kk]ey[\\s:=\"']+[A-Za-z0-9_\\-]{20,}"
-      - name: "Generic Secret"
-        regex: "[Ss]ecret[\\s:=\"']+[A-Za-z0-9_\\-]{20,}"
       - name: "Mailgun API Key"
-        regex: "key-[0-9a-zA-Z]{32}"
-      - name: "Stripe API Key"
-        regex: "sk_live_[0-9a-zA-Z]{24}"
+        regex: "\\bkey-[0-9a-zA-Z]{32}\\b"
+        severity: "high"
+        confidence: "medium"
+        entropy: false
       - name: "Firebase URL"
         regex: "https://[a-z0-9-]+\\.firebaseio\\.com"
-      - name: "S3 Bucket"
-        regex: "[a-zA-Z0-9.-]+\\.s3\\.amazonaws\\.com"
-      - name: "Heroku API Key"
-        regex: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        severity: "low"
+        confidence: "high"
+        entropy: false
+      - name: "Internal Hostname"
+        regex: "\\b[a-z0-9-]+\\.(?:internal|corp|local|intranet)\\b"
+        severity: "low"
+        confidence: "low"
+        entropy: false
 
-github_recon:
-  enabled: true
-  token: ""
-  max_repos: 10
-  max_issues: 10
-
+# ------------------------------------------------------------------
+# Phase 10 - Cloud storage enumeration
+# ------------------------------------------------------------------
 cloud_enum:
   enabled: true
   aws: true
   azure: true
   gcp: true
+  max_candidates: 120
 
+# ------------------------------------------------------------------
+# Phase 11 - Vulnerability scanning
+# ------------------------------------------------------------------
 vuln_scanning:
   enabled: true
   nuclei:
@@ -282,8 +323,8 @@ vuln_scanning:
     bulk_size: 25
     concurrency: 25
     headless: false
-    new_templates: true
     automatic_scan: true
+    new_templates: false         # -nt updates templates over the network
   nikto:
     enabled: true
     tuning: "1234567890"
@@ -292,10 +333,9 @@ vuln_scanning:
     threads: 10
     blind_xss: ""
   sqlmap:
-    enabled: false
+    enabled: false               # aggressive; enable deliberately
     level: 1
     risk: 1
-    batch: true
   crlfuzz:
     enabled: true
     concurrency: 25
@@ -303,13 +343,14 @@ vuln_scanning:
     enabled: true
     threads: 20
 
+# ------------------------------------------------------------------
+# Phase 12 - Sensitive information / OSINT
+# ------------------------------------------------------------------
 sensitive_info:
   enabled: true
-  s3scanner:
-    enabled: true
   github_dorking:
     enabled: true
-    token: ""
+    token: ""                    # falls back to GITHUB_TOKEN / github_recon.token
     dorks:
       - "password"
       - "secret"
@@ -321,23 +362,27 @@ sensitive_info:
       - "db_password"
       - "ftp"
       - "ssh"
-  shodan:
-    enabled: false
-    api_key: ""
   google_dorking:
     enabled: true
     dorks:
       - "site:{target} ext:sql | ext:db | ext:log | ext:bak"
-      - "site:{target} ext:xml | ext:conf | ext:cnf | ext:cfg"
-      - "site:{target} ext:env | ext:ini | ext:yml"
+      - "site:{target} ext:xml | ext:conf | ext:env | ext:ini | ext:yml"
       - "site:{target} inurl:admin | inurl:login | inurl:dashboard"
       - "site:{target} intitle:\"index of\""
       - "site:{target} inurl:api | inurl:v1 | inurl:v2"
       - "site:{target} ext:php intitle:\"phpinfo()\""
-      - "site:{target} inurl:wp-content | inurl:wp-includes"
+  shodan:
+    enabled: false
+    api_key: ""                  # or export SHODAN_API_KEY
+  s3scanner:
+    enabled: false               # cloud_enum covers buckets without extra tooling
 
+# ------------------------------------------------------------------
+# Phase 13 - Screenshots
+# ------------------------------------------------------------------
 screenshots:
   enabled: true
+  max_hosts: 100
   gowitness:
     enabled: true
     threads: 10
@@ -348,16 +393,29 @@ screenshots:
     threads: 5
     timeout: 15000
 
+# ------------------------------------------------------------------
+# Phase 14 - Prioritisation
+# ------------------------------------------------------------------
+finding_prioritizer:
+  enabled: true
+  min_severity: "info"           # info | low | medium | high | critical
+
+# ------------------------------------------------------------------
+# Phase 15 - Reporting
+# ------------------------------------------------------------------
 reporting:
+  enabled: true
   html_report: true
   markdown_report: true
   json_export: true
   csv_export: true
-  findings_json: true
-  findings_csv: true
 
+# ------------------------------------------------------------------
+# Notifications (off by default - nothing leaves your machine)
+# ------------------------------------------------------------------
 notifications:
   enabled: false
+  critical_only: true            # only push critical/high findings
   slack:
     enabled: false
     webhook_url: ""

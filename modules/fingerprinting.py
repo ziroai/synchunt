@@ -1,144 +1,234 @@
 """
-BugHuntRecon - Web Technology Fingerprinting Module
-Integrates: WhatWeb, wafw00f, webanalyze
+SyncHunt - Web Fingerprinting
+Tech-stack and WAF detection with whatweb / wafw00f / webanalyze, plus a
+built-in passive fallback that reads headers from the validation phase.
 """
 
-import os
+from __future__ import annotations
+
 import json
+import os
 import time
-from core.utils import read_file_lines, write_file_lines
+from typing import Dict, List
+
+from core.models import Asset, Finding
+from core.net import http_request
+from core.utils import read_file_lines, save_json, truncate
 
 
 class Fingerprinter:
-    """Web technology fingerprinting and WAF detection."""
+    """Detect technologies and WAFs on live hosts."""
 
-    def __init__(self, config, runner, logger, output_dir, live_hosts_file):
-        self.config = config
-        self.runner = runner
-        self.logger = logger
-        self.output_dir = os.path.join(output_dir, "fingerprinting")
-        self.live_hosts_file = live_hosts_file
-        self.technologies = {}
-
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self.config = ctx.config
+        self.runner = ctx.runner
+        self.logger = ctx.logger
+        self.output_dir = ctx.path("fingerprinting")
+        self.live_hosts_file = ctx.resolve_file("live_hosts", "dns", "live_hosts.txt")
         os.makedirs(self.output_dir, exist_ok=True)
+        self.technologies: Dict[str, List[str]] = {}
+        self.waf: Dict[str, str] = {}
+        self.findings: List[Finding] = []
 
-    def run_all(self):
-        """Run all fingerprinting tools."""
-        self.logger.phase_banner("WEB FINGERPRINTING", 4)
-        start_time = time.time()
+    # ------------------------------------------------------------------
+    def run_all(self) -> str:
+        self.logger.phase_banner("WEB FINGERPRINTING", 5)
+        started = time.time()
 
-        live_hosts = read_file_lines(self.live_hosts_file)
-        if not live_hosts:
-            self.logger.warning("No live hosts for fingerprinting!")
-            return None
+        hosts = read_file_lines(self.live_hosts_file)
+        if not hosts:
+            self.logger.warning("No live hosts to fingerprint")
+            return self.output_dir
 
-        self.logger.info(f"Fingerprinting {len(live_hosts)} live hosts...")
+        self.logger.info(f"Fingerprinting {len(hosts)} host(s)...")
+        if self.config.is_tool_enabled("fingerprinting", "whatweb"):
+            self.run_whatweb()
+        if self.config.is_tool_enabled("fingerprinting", "wafw00f"):
+            self.run_wafw00f()
+        if self.config.is_tool_enabled("fingerprinting", "webanalyze"):
+            self.run_webanalyze()
 
-        # WhatWeb
-        if self.config.is_tool_enabled('fingerprinting', 'whatweb'):
-            try:
-                self.run_whatweb()
-            except Exception as e:
-                self.logger.error(f"WhatWeb failed: {str(e)}")
+        # Always run the passive fallback: it also back-fills from the
+        # validation phase details so results exist even without binaries.
+        self.passive_fingerprint(hosts)
+        self._write_outputs()
 
-        # wafw00f
-        if self.config.is_tool_enabled('fingerprinting', 'wafw00f'):
-            try:
-                self.run_wafw00f()
-            except Exception as e:
-                self.logger.error(f"wafw00f failed: {str(e)}")
-
-        # webanalyze
-        if self.config.is_tool_enabled('fingerprinting', 'webanalyze'):
-            try:
-                self.run_webanalyze()
-            except Exception as e:
-                self.logger.error(f"webanalyze failed: {str(e)}")
-
-        duration = time.time() - start_time
-        self.logger.result(f"Fingerprinting Complete in {duration:.1f}s")
-
+        self.logger.result(
+            f"Fingerprinting Complete: {len(self.technologies)} host(s) profiled "
+            f"in {time.time() - started:.1f}s"
+        )
         return self.output_dir
 
-    def run_whatweb(self):
-        """Run WhatWeb for technology detection."""
-        self.logger.info("Running WhatWeb...")
+    # ------------------------------------------------------------------
+    def run_whatweb(self) -> None:
+        if self.runner.require("whatweb"):
+            return
+        cfg = self.config.get_tool_config("fingerprinting", "whatweb")
+        json_file = os.path.join(self.output_dir, "whatweb.json")
+        self.logger.info("Running whatweb...")
+        cmd = [
+            "whatweb", "-i", self.live_hosts_file,
+            "-a", str(cfg.get("aggression", 3)),
+            f"--log-json={json_file}", "--no-errors", "--quiet",
+        ]
+        self.runner.run(cmd, tool_name="whatweb", timeout=1200)
+        self._parse_whatweb(json_file)
 
-        tool_config = self.config.get_tool_config('fingerprinting', 'whatweb')
-        output_file = os.path.join(self.output_dir, "whatweb_output.txt")
-        json_file = os.path.join(self.output_dir, "whatweb_output.json")
+    def _parse_whatweb(self, json_file: str) -> None:
+        if not os.path.exists(json_file):
+            return
+        with open(json_file, "r", errors="ignore") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                target = record.get("target") or ""
+                plugins = record.get("plugins") or {}
+                if target and isinstance(plugins, dict):
+                    self.technologies.setdefault(target, [])
+                    for name in plugins:
+                        if name not in self.technologies[target]:
+                            self.technologies[target].append(name)
 
-        aggression = tool_config.get('aggression', 3)
+    def run_wafw00f(self) -> None:
+        if self.runner.require("wafw00f"):
+            return
+        json_file = os.path.join(self.output_dir, "wafw00f.json")
+        self.logger.info("Running wafw00f...")
+        cmd = ["wafw00f", "-i", self.live_hosts_file, "-o", json_file, "-f", "json"]
+        self.runner.run(cmd, tool_name="wafw00f", timeout=900)
+        from core.utils import load_json
 
-        hosts = read_file_lines(self.live_hosts_file)
+        data = load_json(json_file, [])
+        if not isinstance(data, list):
+            data = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            target = entry.get("url") or entry.get("target") or ""
+            detected = entry.get("detected") or entry.get("firewall")
+            if target and detected:
+                name = detected if isinstance(detected, str) else str(detected)
+                if name.lower() not in ("none", "false", ""):
+                    self.waf[target] = name
+        if self.waf:
+            self.logger.found(f"WAF detected on {len(self.waf)} host(s)")
 
-        # WhatWeb can read from file using -i
-        cmd = (
-            f"whatweb -i {self.live_hosts_file} "
-            f"-a {aggression} "
-            f"--log-json={json_file} "
-            f"--log-verbose={output_file} "
-            f"--no-errors"
-        )
-
-        result = self.runner.run(cmd, tool_name="whatweb", timeout=900)
-
-        self.logger.found("WhatWeb fingerprinting complete")
-
-    def run_wafw00f(self):
-        """Run wafw00f for WAF detection."""
-        self.logger.info("Running wafw00f for WAF detection...")
-
-        output_file = os.path.join(self.output_dir, "wafw00f_output.txt")
-        json_file = os.path.join(self.output_dir, "wafw00f_output.json")
-
-        cmd = (
-            f"wafw00f -i {self.live_hosts_file} "
-            f"-o {json_file} -f json"
-        )
-
-        result = self.runner.run(
-            cmd,
-            output_file=output_file,
-            tool_name="wafw00f",
-            timeout=600
-        )
-
-        waf_results = read_file_lines(output_file)
-        waf_detected = [l for l in waf_results if 'behind' in l.lower() or 'waf' in l.lower()]
-
-        if waf_detected:
-            self.logger.found(f"wafw00f: WAF detected on {len(waf_detected)} hosts")
-        else:
-            self.logger.info("wafw00f: No WAF detected")
-
-    def run_webanalyze(self):
-        """Run webanalyze for technology stack detection."""
+    def run_webanalyze(self) -> None:
+        if self.runner.require("webanalyze"):
+            return
         self.logger.info("Running webanalyze...")
-
-        output_file = os.path.join(self.output_dir, "webanalyze_output.json")
-
-        hosts = read_file_lines(self.live_hosts_file)
-
-        # webanalyze processes one host at a time or via crawl
         results = []
-        for host in hosts:
-            cmd = f"webanalyze -host {host} -output json -silent"
-
+        for host in read_file_lines(self.live_hosts_file)[:40]:
             result = self.runner.run(
-                cmd,
-                tool_name=f"webanalyze-{host}",
-                timeout=30
+                ["webanalyze", "-host", host, "-output", "json", "-silent"],
+                tool_name=f"webanalyze-{host[:30]}",
+                timeout=60,
             )
+            output = (result.get("stdout") or "").strip()
+            if result.get("success") and output:
+                try:
+                    parsed = json.loads(output)
+                except ValueError:
+                    continue
+                for item in parsed if isinstance(parsed, list) else [parsed]:
+                    name = (item or {}).get("app_name") or (item or {}).get("name")
+                    if name:
+                        self.technologies.setdefault(host, []).append(str(name))
+                results.append({"host": host, "output": parsed})
+        save_json(results, os.path.join(self.output_dir, "webanalyze.json"))
 
-            if result['success'] and result['stdout']:
-                results.append({
-                    'host': host,
-                    'output': result['stdout']
-                })
+    def passive_fingerprint(self, hosts: List[str]) -> None:
+        """Header-based fallback / enrichment (no external tools needed)."""
+        from core.utils import load_json
 
-        # Save combined results
-        with open(output_file, 'w') as f:
-            json.dump(results, f, indent=2)
+        details = load_json(self.ctx.get_file("live_hosts_details", ""), [])
+        for record in details if isinstance(details, list) else []:
+            url = record.get("url") or ""
+            if not url:
+                continue
+            self.technologies.setdefault(url, [])
+            for tech in record.get("tech") or []:
+                if tech not in self.technologies[url]:
+                    self.technologies[url].append(str(tech))
+            server = record.get("server") or ""
+            if server and server not in self.technologies[url]:
+                self.technologies[url].append(server)
 
-        self.logger.found(f"webanalyze: Analyzed {len(results)} hosts")
+        # Probe only hosts that have no intel yet, keeping the request volume low.
+        missing = [h for h in hosts if h not in self.technologies][:25]
+        for host in missing:
+            url = host if host.startswith("http") else f"https://{host}"
+            result = http_request(
+                self.ctx.session, "GET", url, limiter=self.ctx.limiter,
+                timeout=min(8, self.config.get_int("general.timeout", 10)),
+                max_bytes=32768,
+            )
+            if not result.reachable:
+                continue
+            tech = []
+            for header in ("Server", "X-Powered-By", "X-AspNet-Version", "Via", "X-Generator"):
+                value = result.header(header)
+                if value:
+                    tech.append(value)
+            if "wp-content" in result.text.lower() or "wordpress" in result.text.lower():
+                tech.append("WordPress")
+            if tech:
+                self.technologies[url] = sorted(set(tech))
+
+            waf_hint = _waf_from_headers(result.headers)
+            if waf_hint:
+                self.waf[url] = waf_hint
+
+    # ------------------------------------------------------------------
+    def _write_outputs(self) -> None:
+        data = {
+            "technologies": self.technologies,
+            "waf": self.waf,
+        }
+        save_json(data, os.path.join(self.output_dir, "technologies.json"))
+        self.ctx.set_file("fingerprint", os.path.join(self.output_dir, "technologies.json"))
+
+        self.ctx.record_assets(
+            [
+                Asset(
+                    kind="technology",
+                    value=tech,
+                    host=url,
+                    source="fingerprinting",
+                    meta={"url": url},
+                )
+                for url, techs in self.technologies.items()
+                for tech in techs
+            ]
+        )
+        if self.findings:
+            self.ctx.record_findings(self.findings)
+
+
+def _waf_from_headers(headers: Dict[str, str]) -> str:
+    haystack = " ".join(f"{k} {v}" for k, v in (headers or {}).items()).lower()
+    for needle, label in (
+        ("cloudflare", "Cloudflare"),
+        ("sucuri", "Sucuri"),
+        ("incapsula", "Imperva"),
+        ("akamai", "Akamai"),
+        ("awselb", "AWS ELB/WAF"),
+        ("mod_security", "ModSecurity"),
+    ):
+        if needle in haystack:
+            return label
+    return ""
+
+
+def summarise_technologies(technologies: Dict[str, List[str]], limit: int = 400) -> str:
+    """Small helper used by tests and reporting."""
+    lines = []
+    for url, techs in sorted(technologies.items()):
+        lines.append(f"{truncate(url, 80)}: {', '.join(techs[:12])}")
+    return "\n".join(lines[:limit])
