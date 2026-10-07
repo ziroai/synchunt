@@ -52,6 +52,16 @@ pip install -r requirements.txt
 python3 main.py --doctor
 ```
 
+Prefer a real command on your `PATH`? The repo is also an installable package:
+
+```bash
+pipx install .          # or: pip install .
+synchunt --doctor       # console script; works outside the checkout
+```
+
+Both entry points are equivalent — everything below uses `python3 main.py` for clarity;
+replace it with `synchunt` if you installed the package.
+
 ### First scan
 
 ```bash
@@ -82,7 +92,9 @@ go install github.com/projectdiscovery/katana/cmd/katana@latest
 ./scripts/fetch_wordlists.sh
 ```
 
-`python3 main.py --check-deps` lists what is installed and what is missing; `--install-deps` prints install hints.
+`python3 main.py --check-deps` lists what is installed and what is missing; `--install-deps`
+prints the install commands. Both exit `1` while anything required is missing, so they can gate a
+CI job. SyncHunt deliberately never runs package managers for you.
 
 ---
 
@@ -107,7 +119,8 @@ python3 main.py -d example.com [options]
 | `--scope-file`, `--out-of-scope-file` | scope files loaded on top of `config.yaml` |
 | `--config` | config file path (default `config.yaml`) |
 | `-v`, `-q` | verbose / quiet |
-| `--check-deps`, `--install-deps`, `--doctor` | dependency and configuration health |
+| `--check-deps`, `--install-deps` | dependency check / install hints (exit `1` if anything missing) |
+| `--doctor` | dependency + configuration health check |
 | `--list-phases`, `--version` | introspection |
 
 Examples:
@@ -280,7 +293,7 @@ notifications:
 ```bash
 pip install -r requirements-dev.txt
 
-python3 -m pytest tests -q                 # 87 unit + integration tests
+python3 -m pytest tests -q                 # 96 unit + integration tests
 python3 -m pyflakes core modules reports main.py tests
 python3 -m compileall -q core modules reports main.py
 

@@ -36,6 +36,13 @@ jobs:
       - name: Unit + integration tests
         run: python -m pytest tests -q
 
+      - name: Install as a package and smoke the console script
+        run: |
+          pip install -e .
+          synchunt --version
+          synchunt --list-phases
+          synchunt --check-deps || true
+
       - name: CLI smoke test
         run: |
           python main.py --list-phases

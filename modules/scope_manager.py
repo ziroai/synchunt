@@ -109,17 +109,34 @@ class ScopeManager:
         out_of_scope_file: Optional[str] = None,
         extra_scope: Optional[Sequence[str]] = None,
         extra_out_of_scope: Optional[Sequence[str]] = None,
+        logger=None,
     ) -> "ScopeManager":
         include_raw: List[str] = []
         exclude_raw: List[str] = []
+        missing: List[str] = []
+
+        def _load(path: str) -> List[str]:
+            if not path:
+                return []
+            if os.path.exists(path):
+                return read_file_lines(path)
+            missing.append(path)
+            return []
 
         for path in [config.get("general.scope_file", ""), scope_file]:
-            if path and os.path.exists(path):
-                include_raw.extend(read_file_lines(path))
+            include_raw.extend(_load(path))
 
         for path in [config.get("general.out_of_scope_file", ""), out_of_scope_file]:
-            if path and os.path.exists(path):
-                exclude_raw.extend(read_file_lines(path))
+            exclude_raw.extend(_load(path))
+
+        if missing:
+            message = (
+                "scope file(s) not found and therefore IGNORED: " + ", ".join(missing)
+            )
+            if logger is not None:
+                logger.warning(message)
+            else:  # pragma: no cover - construction without a logger
+                print(f"WARNING: {message}")
 
         include_raw.extend(config.get_list("scope.include", []) or [])
         exclude_raw.extend(config.get_list("scope.exclude", []) or [])

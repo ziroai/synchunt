@@ -90,6 +90,79 @@ def test_invalid_targets_are_rejected(monkeypatch, tmp_path, capsys):
     assert "No valid targets" in capsys.readouterr().out
 
 
+def test_install_deps_works_without_a_target(monkeypatch, capsys):
+    """Regression: --install-deps on its own used to demand a target."""
+    monkeypatch.setattr(sys, "argv", ["synchunt", "--install-deps"])
+    code = cli.main()
+    output = capsys.readouterr().out
+    assert "specify a target" not in output
+    assert "Checking Tool Dependencies" in output
+    assert code in (0, 1)
+
+
+def test_diagnostics_run_without_a_config_file(monkeypatch, tmp_path, capsys):
+    """A pipx/installed SyncHunt must work outside a checkout for read-only cmds."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["synchunt", "--list-phases"])
+    assert cli.main() == 0
+    assert "subdomain" in capsys.readouterr().out
+    assert not (tmp_path / "output").exists(), "diagnostics must not create output/"
+
+
+def test_scan_without_a_config_file_still_fails_clearly(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["synchunt", "-d", "example.com"])
+    assert cli.main() == 2
+    assert "Configuration file not found" in capsys.readouterr().out
+
+
+def test_cli_overrides_reach_the_config(monkeypatch, tmp_path, capsys):
+    """--threads/--timeout/--rate-limit must land in the config used by phases."""
+    captured = {}
+
+    def fake_run(self):
+        captured["threads"] = self.config.get_int("general.threads")
+        captured["timeout"] = self.config.get_timeout()
+        captured["rate"] = self.config.get_rate_limit()
+        return 0
+
+    monkeypatch.setattr(cli.SyncHunt, "run", fake_run)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["synchunt", "-d", "example.com", "--config",
+         str(tmp_path / "cfg.yaml"), "--threads", "7", "--timeout", "11",
+         "--rate-limit", "3.5"],
+    )
+    (tmp_path / "cfg.yaml").write_text("general:\n  output_dir: " + str(tmp_path / "out") + "\n")
+    assert cli.main() == 0
+    assert captured == {"threads": 7, "timeout": 11, "rate": 3.5}
+
+
+def test_json_report_is_written_even_when_the_run_fails(monkeypatch, tmp_path, capsys):
+    import json as jsonlib
+
+    summary = tmp_path / "summary.json"
+    monkeypatch.setattr(
+        sys, "argv",
+        ["synchunt", "-d", "not a domain", "--json-report", str(summary)],
+    )
+    assert cli.main() == 3
+    payload = jsonlib.loads(summary.read_text())
+    assert payload["exit_code"] == 3
+    assert payload["targets"] == []
+
+
+def test_missing_scope_file_warns_loudly(monkeypatch, tmp_path, config_path, capsys):
+    monkeypatch.setattr(
+        sys, "argv",
+        ["synchunt", "-d", "example.com", "--dry-run", "--config", config_path,
+         "--scope-file", str(tmp_path / "nope.txt"),
+         "--output-dir", str(tmp_path / "out")],
+    )
+    assert cli.main() == 0
+    assert "IGNORED" in capsys.readouterr().out
+
+
 def test_phase_selection_always_includes_reporting(config_path, tmp_path):
     args = cli.parse_arguments(["-d", "example.com", "--phase", "subdomain",
                                 "--config", config_path])

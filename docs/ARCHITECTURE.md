@@ -141,6 +141,11 @@ Both are controlled by `reporting.sarif_export` / `reporting.track_history` and 
 - output selection (`get_output_dir(target, run_id)`, `latest_output_dir(target)` for `--resume`),
 - `validate(known_phases)` for `--doctor` (profiles, scope files, wordlists, rate limits).
 
+`ConfigManager(..., allow_missing=True)` is used by the read-only commands (`--list-phases`,
+`--check-deps`, `--install-deps`, `--doctor`) so an installed SyncHunt works outside a checkout;
+scans still require a real config file and fail with exit `2` when it is missing. Those commands
+are also the only ones that do not create the output directory.
+
 CLI flags override config values; environment variables can supply secrets (GitHub token, Shodan key, webhooks).
 
 ## 9. Adding a phase

@@ -163,9 +163,17 @@ class SyncHunt:
         self.args = args
         self.scan_start = datetime.now()
         self.scan_end: Optional[datetime] = None
-        self.config = ConfigManager(args.config)
+        # Read-only commands work without a config file (e.g. a pipx install
+        # outside a checkout); scanning still requires a real one.
+        diagnostics = bool(
+            getattr(args, "list_phases", False) or getattr(args, "check_deps", False)
+            or getattr(args, "install_deps", False) or getattr(args, "doctor", False)
+        )
+        self.config = ConfigManager(args.config, allow_missing=diagnostics)
         self.base_output = args.output_dir or self.config.get("general.output_dir", "output")
-        os.makedirs(self.base_output, exist_ok=True)
+        if not diagnostics:
+            # read-only commands must not litter the filesystem
+            os.makedirs(self.base_output, exist_ok=True)
 
         verbose = args.verbose or self.config.get_bool("general.verbose", True)
         if args.quiet:
@@ -183,6 +191,8 @@ class SyncHunt:
         self.selected_phases: List[str] = []
         # Filled in as targets are scanned; consumed by --json-report
         self.run_reports: List[Dict[str, Any]] = []
+        self.json_targets: List[str] = []
+        self._json_report_written = False
         self.last_artifacts: Dict[str, str] = {}
         self.last_history = None
         self._interrupted = False
@@ -274,6 +284,19 @@ class SyncHunt:
     # Main entry
     # ------------------------------------------------------------------
     def run(self) -> int:
+        """Run the CLI, always emitting --json-report when one was requested."""
+        started = time.time()
+        exit_code = 1
+        try:
+            exit_code = self._execute()
+            return exit_code
+        finally:
+            if not self._json_report_written:
+                self._write_json_report(
+                    exit_code, self.json_targets, time.time() - started
+                )
+
+    def _execute(self) -> int:
         self.logger.banner(__version__)
 
         if self.args.list_phases:
@@ -282,7 +305,7 @@ class SyncHunt:
 
         checker = DependencyChecker(self.logger)
 
-        if self.args.check_deps:
+        if self.args.check_deps or self.args.install_deps:
             result = checker.check_all()
             if self.args.install_deps:
                 checker.auto_install()
@@ -335,7 +358,9 @@ class SyncHunt:
 
         self.scan_end = datetime.now()
         duration = (self.scan_end - self.scan_start).total_seconds()
-        self._write_json_report(exit_code, targets, duration)
+        if self.args.json_report:
+            self.json_targets = targets
+            self._write_json_report(exit_code, targets, duration)
         self.logger.info("=" * 62)
         self.logger.result(
             f"🏁 All scans complete in {format_duration(duration)}"
@@ -369,6 +394,7 @@ class SyncHunt:
             scope_file=self.args.scope_file,
             out_of_scope_file=self.args.out_of_scope_file,
             extra_scope=[target] if is_valid_target(target) else None,
+            logger=self.logger,
         )
         self.scope = scope
 
@@ -625,6 +651,7 @@ class SyncHunt:
         try:
             ensure_dir(os.path.dirname(os.path.abspath(path)))
             save_json(payload, path)
+            self._json_report_written = True
             self.logger.info(f"JSON report: {os.path.abspath(path)}")
         except OSError as exc:
             self.logger.error(f"could not write JSON report: {exc}")
@@ -885,7 +912,8 @@ Examples:
     diag_group.add_argument("--check-deps", action="store_true",
                             help="check tool dependencies and exit")
     diag_group.add_argument("--install-deps", action="store_true",
-                            help="print install commands for missing tools")
+                            help="print install commands for missing tools "
+                                 "(exits 1 while anything is missing)")
     diag_group.add_argument("--doctor", action="store_true",
                             help="dependency + configuration health check")
     diag_group.add_argument("--list-phases", action="store_true", help="list phases and exit")
@@ -893,7 +921,9 @@ Examples:
 
     args = parser.parse_args(argv)
 
-    diagnostic = args.check_deps or args.doctor or args.list_phases
+    diagnostic = (
+        args.check_deps or args.install_deps or args.doctor or args.list_phases
+    )
     if not args.domain and not args.list and not diagnostic:
         parser.error("specify a target with -d/--domain or -l/--list (or use --doctor)")
 
@@ -906,7 +936,10 @@ def main() -> int:
         app = SyncHunt(args)
     except FileNotFoundError as exc:
         print(f"\n❌ {exc}")
-        print("Create config.yaml or point at one with --config")
+        print(
+            "Create config.yaml in the working directory, point at one with "
+            "--config PATH,\nor copy the fully commented example from the repository."
+        )
         return 2
     except ValueError as exc:
         print(f"\n❌ invalid configuration: {exc}")

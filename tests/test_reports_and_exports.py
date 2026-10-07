@@ -145,6 +145,59 @@ def test_data_exporter_respects_format_toggles(tmp_path):
 
 
 # ----------------------------------------------------------------------
+# Notifications
+# ----------------------------------------------------------------------
+def test_notifier_payloads_for_slack_discord_and_telegram(tmp_path):
+    import yaml
+
+    from core.config_manager import ConfigManager
+    from reports.notifier import Notifier
+
+    config_file = tmp_path / "cfg.yaml"
+    config_file.write_text(yaml.safe_dump({
+        "notifications": {
+            "enabled": True,
+            "critical_only": False,
+            "slack": {"enabled": True, "webhook_url": "https://hooks.slack.test/x"},
+            "discord": {"enabled": True, "webhook_url": "https://discord.test/x"},
+            "telegram": {"enabled": True, "bot_token": "123:abc", "chat_id": "42"},
+        }
+    }))
+    notifier = Notifier(ConfigManager(str(config_file)))
+    sent = []
+
+    def fake_post(url, payload, ok_statuses=(200, 204)):
+        sent.append((url, payload))
+        return True
+
+    notifier._post = fake_post  # noqa: SLF001 - deliberate test seam
+
+    assert notifier.send_slack("hello") is True
+    assert notifier.send_discord("hello") is True
+    assert notifier.send_telegram("hello") is True
+
+    urls = [url for url, _ in sent]
+    assert urls == [
+        "https://hooks.slack.test/x",
+        "https://discord.test/x",
+        "https://api.telegram.org/bot123:abc/sendMessage",
+    ]
+    assert sent[0][1]["blocks"][0]["type"] == "section"
+    assert sent[1][1]["content"].startswith("**")
+    assert sent[2][1] == {"chat_id": "42", "text": sent[2][1]["text"]}
+    assert notifier.notify_all("summary") == {"slack": True, "discord": True, "telegram": True}
+
+
+def test_notifier_stays_silent_when_disabled(ctx):
+    from reports.notifier import Notifier
+
+    notifier = Notifier(ctx.config)
+    assert notifier.enabled is False
+    assert notifier.notify_all("nothing") == {}
+    assert notifier.send_slack("nothing") is False
+
+
+# ----------------------------------------------------------------------
 # SARIF export
 # ----------------------------------------------------------------------
 def test_sarif_export_is_valid_and_maps_severities(tmp_path):

@@ -21,9 +21,19 @@ class ConfigManager:
 
     DEFAULT_CONFIG_PATH = "config.yaml"
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None,
+                 allow_missing: bool = False):
+        """
+        Load a config file.
+
+        `allow_missing=True` is used by read-only CLI commands (--list-phases,
+        --check-deps, --doctor): they need no configuration, so an installed
+        SyncHunt works outside a checkout. Real scans stay strict.
+        """
         self.config_path = config_path or self.DEFAULT_CONFIG_PATH
         self.config: Dict[str, Any] = {}
+        self.allow_missing = allow_missing
+        self.missing_file = False
         self._load_config()
 
     # ------------------------------------------------------------------
@@ -31,6 +41,11 @@ class ConfigManager:
     # ------------------------------------------------------------------
     def _load_config(self) -> None:
         if not os.path.exists(self.config_path):
+            if self.allow_missing:
+                # Diagnostics only: chapter defaults are used everywhere.
+                self.missing_file = True
+                self.config = {}
+                return
             raise FileNotFoundError(
                 f"Configuration file not found: {self.config_path}"
             )
