@@ -44,7 +44,7 @@ Homepage = "https://github.com/ziroai/synchunt"
 Issues = "https://github.com/ziroai/synchunt/issues"
 
 [tool.setuptools]
-py-modules = ["main"]
+py-modules = ["main", "tools_cli"]
 
 [tool.setuptools.packages.find]
 include = ["core*", "modules*", "reports*"]

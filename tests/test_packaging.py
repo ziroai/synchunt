@@ -41,8 +41,12 @@ def test_console_script_points_at_main_main(pyproject):
     assert scripts["synchunt-tools"] == "tools_cli:main"
 
     import main as cli
+    import tools_cli as tools
 
     assert callable(cli.main)
+    assert callable(tools.main)
+    # both entry points must be installed as importable top-level modules
+    assert set(pyproject["tool"]["setuptools"]["py-modules"]) == {"main", "tools_cli"}
 
 
 def test_declared_modules_exist(pyproject):
