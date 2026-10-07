@@ -6,6 +6,7 @@ layer (console encoding, UTF-8 I/O, portable process handling).
 import os
 import subprocess
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -132,6 +133,9 @@ def test_kill_process_tree_terminates_a_real_child():
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     kill_process_tree(process, grace=0.2)
+    deadline = time.time() + 10
+    while process.poll() is None and time.time() < deadline:
+        time.sleep(0.1)
     assert process.poll() is not None
 
 

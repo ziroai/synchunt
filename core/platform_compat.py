@@ -95,33 +95,57 @@ class AsciiStream:
         return getattr(self._stream, name)
 
 
+def _wrappable(stream) -> bool:
+    """True for real OS-level streams (never for in-memory capture buffers)."""
+    try:
+        stream.fileno()
+    except Exception:
+        return False
+    return True
+
+
+def _stream_encodes_unicode(stream) -> bool:
+    """Can this stream's encoding represent box-drawing characters?"""
+    encoding = (getattr(stream, "encoding", "") or "").strip().lower()
+    if not encoding:
+        return True  # unknown (capture buffers, StringIO) - assume capable
+    try:
+        "\u2550".encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return False
+    return True
+
+
 def configure_stdio() -> bool:
     """
     Make stdout/stderr UTF-8 capable. Returns True when unicode output is safe.
 
-    On Python 3.7+ `reconfigure` is available; on a legacy console the call
-    either fails or reports an encoding that cannot encode the icons, in which
-    case the caller should degrade to ASCII (the logger does this automatically).
+    ASCII mode is enabled only when `SYNCHUNT_ASCII` asks for it or the console
+    demonstrably cannot encode box-drawing characters or emoji. In-memory
+    streams (test runners, notebooks) are never wrapped, so importing the
+    framework can never break a host application's capture machinery.
     """
     safe = True
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:
-            safe = False
+        if stream is None:
             continue
-        try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except Exception:  # pragma: no cover - exotic consoles
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:  # pragma: no cover - exotic consoles
+                pass
+        if not _stream_encodes_unicode(stream):
             safe = False
     if not safe:
         set_ascii_mode(True)
     if ascii_mode():
-        # Wrap the streams once: this covers prints, logging handlers, progress
+        # Wrap real streams once: this covers prints, logging handlers, progress
         # bars and any third-party output, not just the framework's own paths.
         for stream_name in ("stdout", "stderr"):
             stream = getattr(sys, stream_name, None)
-            if stream is not None and not isinstance(stream, AsciiStream):
+            if stream is not None and not isinstance(stream, AsciiStream) and _wrappable(stream):
                 setattr(sys, stream_name, AsciiStream(stream))
     return safe
 

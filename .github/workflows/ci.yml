@@ -34,7 +34,15 @@ jobs:
         run: python -m pyflakes core modules reports main.py tests
 
       - name: Unit + integration tests
-        run: python -m pytest tests -q
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests -q 2>&1 | tee pytest-output.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            tail -n 20 pytest-output.log | sed 's/^/::error::/'
+          fi
+          exit "$status"
 
       - name: Install as a package and smoke the console script
         run: |
@@ -79,7 +87,15 @@ jobs:
           pip install -e .
 
       - name: Unit + integration tests
-        run: python -m pytest tests -q
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests -q 2>&1 | tee pytest-output.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            tail -n 20 pytest-output.log | sed 's/^/::error::/'
+          fi
+          exit "$status"
 
       - name: Cross-platform verification sweep
         run: python scripts/check.py --quick --jobs 2
