@@ -16,6 +16,11 @@ everything missing. `synchunt-tools` exposes the offline helpers (dedupe/unfurl/
 **Automated coverage: 63 of 78 tools (81%)** — the other 15 are manual/companion by design (licences,
 host-level capture, interactive exploitation, credential brute force).
 
+Beyond the tool list, SyncHunt adds three things the list does not cover: **authenticated scanning**
+(`--cookie` / `--header`, applied to the session and to the tools that support headers), **CISA KEV +
+FIRST EPSS enrichment** for every CVE in the findings (`finding_prioritizer.threat_intel`), and
+**submission drafts** in HackerOne / Intigriti / Bugcrowd formats (`reports/submission_*`).
+
 ---
 
 ## Reconnaissance & subdomain enumeration

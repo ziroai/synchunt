@@ -63,8 +63,23 @@ python3 main.py -d example.com --phase validation,enrichment,takeover,portscan,f
 - **Ports** (phase 5): naabu/nmap/masscan/rustscan.
 - **Fingerprinting** (phase 6): tech stack + WAF (whatweb, waf00f, webanalyze, header heuristics).
 
-Interception plugs in with one flag: `--proxy http://127.0.0.1:8080` routes every SyncHunt request *and*
-every child tool through Burp Suite, ZAP or mitmproxy, so you can watch (and replay) the entire scan.
+**Authenticated surface**: many programs require a logged-in account before anything interesting is
+reachable. Carry the session everywhere with one flag (or the config keys):
+
+```bash
+synchunt -d example.com --cookie "session=abc123"          --header "Authorization: Bearer eyJ..." --header "X-Bug-Bounty: handle"
+```
+
+The headers go into the shared HTTP session (enrichment, API introspection, OOB probes, takeover and cloud
+checks all use them) and into the tools that support custom headers (nuclei, httpx, katana, ffuf, gobuster,
+feroxbuster, wfuzz, dalfox, sqlmap, arjun). SyncHunt only ever *logs header names* — values stay out of the
+console, the report and the database. Never store another user's session: use an account you created for
+the test.
+
+Interception plugs in with one flag: `--proxy http://127.0.0.1:8080` routes every HTTP step — the built-in
+client and the HTTP-based tools (nuclei, httpx, ffuf, katana, sqlmap, …) — through Burp Suite, ZAP or
+mitmproxy, so you can watch (and replay) the whole scan. Raw-socket scanners (nmap, masscan, naabu,
+rustscan) and DNS tools cannot use an HTTP proxy; sqlmap/nikto/wpscan receive their own proxy flag.
 
 Useful output: `dns/live_hosts.txt`, `takeover/candidates.json`, `ports/all_ports.txt`, `fingerprinting/technologies.json`.
 
@@ -126,9 +141,17 @@ Everything lands in the SQLite database, is de-duplicated by fingerprint and sco
 
 ### Exploit intelligence and hash triage
 
-Phase 15 matches every CVE in the findings against your **local Exploit-DB** (`searchsploit`), tags the
-finding `public-exploit`, bumps its score and writes `findings_prioritized/exploits.json` — so a critical
-with a working PoC sorts above one without.
+Phase 15 does two CVE passes:
+
+1. **CISA KEV + FIRST EPSS** (`finding_prioritizer.threat_intel`, on by default) — the CVE list from your
+   findings is checked against public feeds *by CVE id* (nothing about the target is sent). Known-exploited
+   issues get `kev` as a tag, a score bump and a readable reason; EPSS percentiles add gradations.
+   `findings_prioritized/threat_intel.json` keeps the raw data, and the response is cached for 12 hours.
+   Offline? The lookup is skipped and the scan continues.
+2. **Local Exploit-DB** (`searchsploit`, if installed) — CVEs are matched to exploit entries, tagged
+   `public-exploit`, and the score is bumped (`findings_prioritized/exploits.json`).
+
+So a critical that is *known exploited in the wild* sorts above one that merely scored critical.
 
 Hashes (JS bundles, leaked files, GitHub dumps) get triaged without leaving the tool:
 

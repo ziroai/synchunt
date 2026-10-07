@@ -29,6 +29,7 @@ from core.context import ScanContext
 from core.database_manager import DatabaseManager, default_db_path
 from core.dependency_checker import DependencyChecker
 from core.logger import BugHuntLogger
+from core.auth import summary as auth_summary
 from core.proxy import apply_proxy_env, describe as describe_proxy
 from core.runner import ToolRunner
 from core.utils import (
@@ -65,6 +66,7 @@ from reports.html_report import HTMLReportGenerator
 from reports.markdown_report import MarkdownReportGenerator
 from reports.notifier import Notifier
 from reports.sarif_export import SarifExporter
+from reports.submission_export import SubmissionExporter
 
 STATE_FILE = "scan_state.json"
 
@@ -198,6 +200,8 @@ class SyncHunt:
         self.proxy = apply_proxy_env(
             self.config, getattr(args, "proxy", "") or "", logger=self.logger
         )
+        if self.proxy:
+            self.config.set("general.proxy", self.proxy)
         self.scope: Optional[ScopeManager] = None
         self.selected_phases: List[str] = []
         # Filled in as targets are scanned; consumed by --json-report
@@ -441,6 +445,7 @@ class SyncHunt:
         self.logger.info(f"Output directory: {output_dir}")
         if self.proxy:
             self.logger.info(f"Proxy: {describe_proxy(self.proxy)}")
+        self.logger.info(f"Authentication: {auth_summary(self.config)}")
         self.logger.info(f"Correlation DB:   {db_path}")
 
         if self.args.dry_run:
@@ -735,6 +740,17 @@ class SyncHunt:
             except Exception as exc:
                 self.logger.error(f"SARIF export failed: {exc}")
 
+        if self.config.get_bool("reporting.submission_exports", True):
+            try:
+                drafted = SubmissionExporter(ctx.output_dir, ctx.target).export(findings)
+                generated.update(drafted)
+                self.logger.found(
+                    "Submission drafts: "
+                    + ", ".join(sorted(drafted))
+                )
+            except Exception as exc:
+                self.logger.error(f"submission export failed: {exc}")
+
         exporter = DataExporter(ctx.output_dir, ctx.target)
         try:
             generated.update(exporter.export_findings(
@@ -922,6 +938,13 @@ Examples:
     scope_group.add_argument("--out-of-scope-file", help="file with excluded entries")
 
     config_group = parser.add_argument_group("Configuration")
+    config_group.add_argument(
+        "--header", action="append", metavar="'Name: value'",
+        help="extra header for every request and tool (repeatable)",
+    )
+    config_group.add_argument(
+        "--cookie", help="Cookie header value for authenticated scanning",
+    )
     config_group.add_argument("--config", default="config.yaml", help="config file path")
     config_group.add_argument("-v", "--verbose", action="store_true")
     config_group.add_argument("-q", "--quiet", action="store_true")
@@ -970,6 +993,10 @@ def main() -> int:
         app.config.set("general.rate_limit", args.rate_limit)
     if getattr(args, "timeout", None):
         app.config.set("general.timeout", args.timeout)
+    if getattr(args, "header", None):
+        app.config.set("general.headers", list(args.header))
+    if getattr(args, "cookie", None):
+        app.config.set("general.cookie", args.cookie)
 
     try:
         return app.run()

@@ -154,6 +154,7 @@ class ContentDiscovery:
             "-c", str(cfg.get("threads", 20)),
             "-o", output_file,
         ]
+        cmd += self.ctx.header_pairs("-H")
         if cfg.get("js_crawl", True):
             cmd.append("-jc")
         self.logger.info("Running katana crawler...")
@@ -268,6 +269,7 @@ class ContentDiscovery:
                 "-d", str(cfg.get("depth", 2)),
                 "--silent", "-o", output_file,
             ]
+            cmd += self.ctx.header_pairs("-H")
             self.runner.run(cmd, tool_name=f"feroxbuster-{safe[:30]}", timeout=900)
 
         self._ingest_directory_findings(raw_dir, ".txt")
@@ -295,6 +297,7 @@ class ContentDiscovery:
                 "-e", f".{extensions.replace(',', ',.')}",
                 "-o", output_file, "-of", "json", "-s",
             ]
+            cmd += self.ctx.header_pairs("-H")
             self.runner.run(cmd, tool_name=f"ffuf-{safe[:30]}", timeout=900)
 
         for name in sorted(os.listdir(raw_dir)):
@@ -385,6 +388,7 @@ class ContentDiscovery:
                 "-t", str(cfg.get("threads", 40)), "-q", "--no-progress",
                 "-k", "-o", output_file,
             ]
+            cmd += self.ctx.header_pairs("-H")
             if cfg.get("extensions"):
                 cmd += ["-x", str(cfg["extensions"])]
             self.runner.run(cmd, tool_name=f"gobuster-{safe[:30]}", timeout=900)
@@ -419,6 +423,7 @@ class ContentDiscovery:
                 "arjun", "-u", host, "-oJ", output_file,
                 "-t", str(cfg.get("threads", 10)), "-q",
             ]
+            cmd += self.ctx.header_pairs("--headers")
             self.runner.run(cmd, tool_name=f"arjun-{safe[:30]}", timeout=900)
 
         for name in sorted(os.listdir(raw_dir)):
@@ -508,6 +513,7 @@ class ContentDiscovery:
                 "-t", str(cfg.get("threads", 20)),
                 "-o", "raw", "-f", output_file,
             ]
+            cmd += self.ctx.header_pairs("-H")
             self.runner.run(cmd, tool_name=f"wfuzz-{safe[:30]}", timeout=900)
         self._ingest_wfuzz(raw_dir)
 

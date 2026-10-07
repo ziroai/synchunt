@@ -107,9 +107,15 @@ Exit codes: `0` ok · `1` error · `2` usage/config · `3` no valid targets · `
 
 ## 5. Interception (Burp Suite / OWASP ZAP / mitmproxy)
 
-One flag routes everything SyncHunt sends through a proxy - the built-in HTTP client *and* every child
-tool (nuclei, httpx, ffuf, sqlmap, ...), because the standard proxy environment variables are exported
-before any traffic starts:
+One flag routes SyncHunt's HTTP traffic through a proxy - the built-in client and every HTTP tool
+(nuclei, httpx, ffuf, katana, sqlmap, ...) - because the standard proxy environment variables are exported
+before any traffic starts. Tools that speak their own protocol are handled explicitly:
+
+| Class | Behaviour |
+|---|---|
+| Built-in HTTP client, HTTP tools (nuclei, httpx, katana, ffuf, gobuster, feroxbuster, wfuzz, dalfox, arjun) | proxied via the standard env vars |
+| sqlmap, nikto, wpscan | also receive their own flag (`--proxy` / `-useproxy`) |
+| Raw-socket scanners (nmap, masscan, naabu, rustscan) and DNS resolvers | **cannot** use an HTTP proxy - they skip it by design |
 
 ```bash
 synchunt -d example.com --full --proxy http://127.0.0.1:8080
@@ -130,7 +136,29 @@ Resolution order: `--proxy` > `general.proxy` > `SYNCHUNT_PROXY`. `NO_PROXY` is 
 - **mitmproxy**: `mitmproxy -p 8080` and use `mitmdump -w flow.dump` to keep a replayable trace of the scan.
 - Interception is off unless you configure it: without a proxy SyncHunt talks directly to the target.
 
-## 6. Offline helper CLI (`synchunt-tools`)
+## 6. Authenticated scanning
+
+```bash
+synchunt -d example.com --cookie "session=abc123" --header "Authorization: Bearer eyJ..."
+```
+
+or in `config.yaml`:
+
+```yaml
+general:
+  cookie: "session=abc123"
+  headers:
+    - "Authorization: Bearer eyJ..."
+    - "X-Bug-Bounty: handle"
+```
+
+- Applied to the shared HTTP session (every in-process request in every phase) and to the external tools
+  that accept headers (nuclei, httpx, katana, ffuf, gobuster, feroxbuster, wfuzz, dalfox, sqlmap, arjun).
+- Only header *names* are logged; values are kept out of the console, the SQLite database and the reports.
+- Create a dedicated test account per program. Do not use a real user's session, and check the program's
+  rules on automated scanning of authenticated areas before you enable the intrusive phases.
+
+## 7. Offline helper CLI (`synchunt-tools`)
 
 Shipped with the package (no extra install), for the small helpers that usually need `go install`:
 
@@ -146,7 +174,7 @@ synchunt-tools identify bundle.js                # hashes inside free text
 
 Everything reads files or stdin and prints to stdout, so it composes in shell pipelines.
 
-## 7. Hardening and data handling
+## 8. Hardening and data handling
 
 - Run as a non-root user; the only privileged feature is raw-socket scanning.
 - `output/` contains findings and possibly secrets: treat it as confidential, restrict permissions, and

@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from core.config_manager import ConfigManager
 from core.logger import BugHuntLogger
+from core.auth import auth_headers as _auth_headers, header_pairs as _header_pairs
 from core.net import RateLimiter, build_session
 from core.runner import ToolRunner
 
@@ -46,9 +47,19 @@ class ScanContext:
             self.session = build_session(
                 user_agent=self.config.get("general.user_agent", "") or None,
                 retries=self.config.get_int("general.retry", 2),
+                extra_headers=_auth_headers(self.config),
             )
         if self.limiter is None:
             self.limiter = RateLimiter(self.config.get_rate_limit())
+
+    # ------------------------------------------------------------------
+    def auth_headers(self) -> Dict[str, str]:
+        """Cookie/token headers applied to every in-process request."""
+        return _auth_headers(self.config)
+
+    def header_pairs(self, flag: str = "-H") -> List[str]:
+        """The same headers as argv pairs for external tools that accept them."""
+        return _header_pairs(self.config, flag)
 
     # ------------------------------------------------------------------
     def path(self, *parts: str) -> str:

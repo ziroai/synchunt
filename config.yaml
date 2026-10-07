@@ -9,6 +9,9 @@ general:
   threads: 50                    # worker threads for built-in probers
   timeout: 30                    # per-tool / per-request timeout (seconds)
   rate_limit: 50                 # HTTP requests per second (shared token bucket)
+  cookie: ""                     # Cookie header for authenticated scanning
+  headers: []                    # extra headers, e.g. ["Authorization: Bearer eyJ..."]
+                                 # (CLI: --cookie / --header "Name: value")
   proxy: ""                      # e.g. "http://127.0.0.1:8080" for Burp/ZAP/mitmproxy
                                  # (CLI: --proxy, env: SYNCHUNT_PROXY)
   resolve_timeout: 5             # DNS timeout (seconds)
@@ -537,12 +540,17 @@ finding_prioritizer:
   searchsploit:
     enabled: true                # attach Exploit-DB entries to CVE findings
     max_cves: 25                 # (local searchsploit database, no network)
+  threat_intel:
+    enabled: true                # CISA KEV + FIRST EPSS (public feeds, by CVE id)
+    timeout: 20
+    cache_hours: 12              # cache lives in findings_prioritized/
 
 # ------------------------------------------------------------------
 # Phase 15 - Reporting
 # ------------------------------------------------------------------
 reporting:
   enabled: true
+  submission_exports: true       # HackerOne / Intigriti / Bugcrowd drafts in reports/
   html_report: true
   markdown_report: true
   sarif_export: true             # reports/results.sarif (GitHub code scanning / CI)

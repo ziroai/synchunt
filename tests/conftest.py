@@ -117,6 +117,8 @@ screenshots:
 finding_prioritizer:
   enabled: true
   min_severity: "info"
+  threat_intel: {{enabled: false}}
+  searchsploit: {{enabled: false}}
 reporting:
   enabled: true
   html_report: true
@@ -218,6 +220,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, '{"status":"UP"}', "application/json")
         elif path == "/.env":
             self._send(200, "SECRET=value")
+        elif path == "/echo":
+            # reflects the request headers so tests can prove auth reaches the target
+            self._send(200, json.dumps({k: v for k, v in self.headers.items()}),
+                       "application/json")
         else:
             self._send(200, PAGE)
 

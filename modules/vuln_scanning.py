@@ -218,6 +218,7 @@ class VulnScanner:
             "-c", str(cfg.get("concurrency", 25)),
             "-o", json_file,
         ]
+        cmd += self.ctx.header_pairs("-H")
         if cfg.get("templates"):
             cmd += ["-t", str(cfg["templates"])]
         if cfg.get("headless", False):
@@ -298,6 +299,9 @@ class VulnScanner:
                 "nikto", "-h", host, "-Tuning", tuning,
                 "-output", output_file, "-Format", "txt", "-nointeractive",
             ]
+            proxy = self.config.get("general.proxy", "")
+            if proxy:
+                cmd += ["-useproxy", proxy]
             self.runner.run(cmd, tool_name=f"nikto-{safe[:30]}", timeout=1200)
         self.logger.found("nikto: scan complete")
 
@@ -320,6 +324,7 @@ class VulnScanner:
             "-w", str(cfg.get("threads", 10)),
             "--silence", "-o", output_file,
         ]
+        cmd += self.ctx.header_pairs("-H")
         blind = cfg.get("blind_xss") or ""
         if not blind and self.oob is not None:
             blind = self.oob.probe_url("blindxss")
@@ -367,6 +372,11 @@ class VulnScanner:
                 "--batch", "--random-agent", "--threads", "5",
                 "--output-dir", output_dir_sqli,
             ]
+            from core.auth import sqlmap_args
+            cmd += sqlmap_args(self.config)
+            proxy = self.config.get("general.proxy", "")
+            if proxy:
+                cmd += ["--proxy", proxy]
             result = self.runner.run(cmd, tool_name="sqlmap", timeout=600)
             combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
             if "injectable" in combined.lower() or "sqlmap identified" in combined.lower():
@@ -546,6 +556,9 @@ class VulnScanner:
                 "--random-user-agent", "--disable-tls-checks",
                 "--plugins-detection", "passive",
             ]
+            proxy = self.config.get("general.proxy", "")
+            if proxy:
+                cmd += ["--proxy", proxy]
             if cfg.get("api_token"):
                 cmd += ["--api-token", str(cfg["api_token"])]
             self.runner.run(cmd, tool_name=f"wpscan-{safe[:30]}", timeout=1800)

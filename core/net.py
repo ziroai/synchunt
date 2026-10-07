@@ -96,8 +96,13 @@ def build_session(
     retries: int = 2,
     backoff: float = 0.4,
     pool_size: int = 32,
+    extra_headers: Optional[Dict[str, str]] = None,
 ) -> requests.Session:
-    """Build a requests session with retries and a bounded connection pool."""
+    """Build a requests session with retries and a bounded connection pool.
+
+    `extra_headers` carries authentication material (Cookie/Authorization/...)
+    so every in-process request in every phase is authenticated.
+    """
     session = requests.Session()
     session.headers.update(
         {
@@ -107,6 +112,8 @@ def build_session(
             "Connection": "close",
         }
     )
+    if extra_headers:
+        session.headers.update({str(k): str(v) for k, v in extra_headers.items()})
     retry = Retry(
         total=max(0, int(retries)),
         connect=max(0, int(retries)),

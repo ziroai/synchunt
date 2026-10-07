@@ -301,6 +301,7 @@ class FindingPrioritizer:
         threshold = severity_rank(self.min_severity)
         self.findings = [f for f in scored if f.severity_rank >= threshold]
 
+        self.enrich_with_threat_intel()
         self.enrich_with_searchsploit()
 
         self._update_database()
@@ -338,6 +339,77 @@ class FindingPrioritizer:
                 priority=finding.extra.get("priority"),
                 reasons=finding.extra.get("score_reasons"),
             )
+
+    # ------------------------------------------------------------------
+    # Threat intelligence (CISA KEV + FIRST EPSS)
+    # ------------------------------------------------------------------
+    def _finding_cves(self, finding: Finding) -> List[str]:
+        haystack = " ".join([
+            finding.title, finding.evidence,
+            " ".join(finding.tags), " ".join(finding.references),
+        ])
+        return [match.upper() for match in CVE_RE.findall(haystack)]
+
+    def enrich_with_threat_intel(self) -> None:
+        """Rank CVE findings by real-world exploitation likelihood."""
+        if not self.config.get_bool("finding_prioritizer.threat_intel.enabled", True):
+            return
+        cves = sorted({cve for finding in self.findings for cve in self._finding_cves(finding)})
+        if not cves:
+            return
+
+        from core.threatintel import ThreatIntel, bonus_for
+
+        client = ThreatIntel(
+            session=getattr(self.ctx, "session", None),
+            limiter=getattr(self.ctx, "limiter", None),
+            logger=self.logger,
+            timeout=float(self.config.get_int("finding_prioritizer.threat_intel.timeout", 20)),
+            cache_path=os.path.join(self.output_dir, "threat_intel_cache.json"),
+            cache_hours=float(
+                self.config.get_int("finding_prioritizer.threat_intel.cache_hours", 12)
+            ),
+        )
+        entries = client.lookup(cves)
+        if not entries:
+            self.logger.debug("threat intel: no data (offline or unknown CVEs)")
+            return
+
+        intel_file = os.path.join(self.output_dir, "threat_intel.json")
+        save_json(entries, intel_file)
+        self.ctx.set_file("threat_intel_json", intel_file)
+
+        enriched = 0
+        for finding in self.findings:
+            hits = sorted(set(self._finding_cves(finding)) & set(entries))
+            if not hits:
+                continue
+            bonus = 0.0
+            reasons: List[str] = []
+            for cve in hits:
+                cve_bonus, cve_reasons = bonus_for(entries[cve])
+                bonus += cve_bonus
+                reasons += [f"{cve}: {reason}" for reason in cve_reasons]
+                if entries[cve].get("kev") and "kev" not in finding.tags:
+                    finding.tags.append("kev")
+            finding.extra["threat_intel"] = {cve: entries[cve] for cve in hits}
+            finding.score = round(finding.score + min(4.0, bonus), 2)
+            recorded = finding.extra.setdefault("score_reasons", [])
+            for reason in reasons:
+                if reason not in recorded:
+                    recorded.append(reason)
+            finding.extra["priority"] = self.priority_for(finding.score)
+            enriched += 1
+
+        if enriched:
+            self.findings.sort(key=lambda item: (-item.score, -item.severity_rank))
+            kev_count = sum(1 for f in self.findings if "kev" in f.tags)
+            self.logger.found(
+                f"threat intel: {enriched} finding(s) enriched"
+                + (f", {kev_count} known-exploited (CISA KEV)" if kev_count else "")
+            )
+        if client.errors:
+            self.logger.debug(f"threat intel unavailable: {'; '.join(client.errors[:2])}")
 
     # ------------------------------------------------------------------
     # Exploit intelligence (searchsploit / Exploit-DB)

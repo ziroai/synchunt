@@ -202,6 +202,7 @@ class SubdomainValidator:
             "-status-code", "-title", "-tech-detect", "-content-length",
             "-web-server", "-o", json_file,
         ]
+        cmd += self.ctx.header_pairs("-H")
         if cfg.get("follow_redirects", True):
             cmd.append("-follow-redirects")
         self.runner.run(cmd, tool_name="httpx", timeout=900)

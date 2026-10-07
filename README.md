@@ -24,8 +24,19 @@
   collector (`vuln_scanning.oob`), so blind bugs become high-confidence findings instead of guesses.
 - **API route brute forcing built in** — a 70-path built-in wordlist (supplementable) finds undocumented
   API routes, with sensitive ones flagged for manual authorisation testing.
-- **Full interactive-platform hook-up** — `--proxy http://127.0.0.1:8080` routes every SyncHunt request *and*
-  every child tool through Burp Suite, OWASP ZAP or mitmproxy (`general.proxy` / `SYNCHUNT_PROXY`).
+- **Authenticated scanning** — `--cookie "session=..."` and `--header "Authorization: Bearer ..."`
+  (or `general.cookie` / `general.headers`) flow into the shared HTTP session *and* into the tools that
+  accept custom headers (nuclei, httpx, katana, ffuf, ffuf/gobuster/feroxbuster/wfuzz, dalfox, sqlmap,
+  arjun), so authenticated surface is in scope instead of invisible. Values are never logged.
+- **Full interactive-platform hook-up** — `--proxy http://127.0.0.1:8080` routes every HTTP step (the built-in
+  client and every HTTP tool: nuclei, httpx, ffuf, katana, sqlmap, ...) through Burp Suite, OWASP ZAP or
+  mitmproxy (`general.proxy` / `SYNCHUNT_PROXY`). Raw-socket scanners (nmap, masscan, naabu, rustscan) and
+  DNS resolvers cannot use an HTTP proxy and skip it by design; sqlmap, nikto and wpscan get their own
+  `--proxy`/`-useproxy` flag automatically.
+- **Real-world exploitation signal** — CVE findings are checked against **CISA KEV** and **FIRST EPSS**
+  (`finding_prioritizer.threat_intel`), so known-exploited issues sort to the top with the reason attached.
+- **Submission drafts** — the report phase writes HackerOne, Intigriti and Bugcrowd submission formats
+  (`reports/submission_*.json|csv`) ready for a human to evidence-check and submit.
 - **gf-patterns classification built in** — the URL corpus is bucketed into `patterns/ssrf.txt`, `xss.txt`,
   `sqli.txt`, `lfi.txt`, `redirect.txt`, `ssti.txt`, `idor.txt`, … so the right scanner sees the right URLs.
 - **Exploit intelligence** — findings that reference a CVE are matched against your local Exploit-DB
@@ -43,7 +54,7 @@
 - **Resumable** — re-run with `--resume` and completed phases are skipped.
 - **Graceful degradation** — every phase works with the tools you have; missing optional tools are skipped with a clear hint, and several phases have built-in fallbacks (crt.sh, HTTP prober, header fingerprinting, OpenAPI/GraphQL probes, cloud-bucket enumeration).
 - **Safe by construction** — no `shell=True` anywhere in the scanning path, rate-limited HTTP session, redacted secrets in output, escaped report rendering.
-- **Tested** — 162 unit/integration tests, CI across Python 3.9–3.12, plus `./scripts/check.sh`.
+- **Tested** — 174 unit/integration tests, CI across Python 3.9–3.12, plus `./scripts/check.sh`.
 
 ---
 
@@ -125,7 +136,8 @@ go install github.com/projectdiscovery/katana/cmd/katana@latest
 ```
 
 Interactive platforms plug in through one flag: `synchunt -d example.com --proxy http://127.0.0.1:8080`
-sends all traffic (built-in client *and* child tools) through Burp Suite, ZAP or mitmproxy.
+sends every HTTP step (built-in client and HTTP-based tools) through Burp Suite, ZAP or mitmproxy;
+`--cookie` / `--header` authenticate the whole scan.
 
 The offline helpers ship with the package:
 
@@ -341,7 +353,7 @@ notifications:
 pip install -r requirements-dev.txt
 ./scripts/check.sh                         # everything below, in parallel
 
-python3 -m pytest tests -q                 # 162 unit + integration tests
+python3 -m pytest tests -q                 # 174 unit + integration tests
 python3 -m pyflakes core modules reports main.py tests
 python3 -m compileall -q core modules reports main.py
 
