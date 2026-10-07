@@ -13,6 +13,7 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from core.i18n import t
 from core.models import Finding
 from core.utils import (
     format_duration,
@@ -43,7 +44,7 @@ class HTMLReportGenerator:
     def generate(self) -> str:
         report_path = os.path.join(self.report_dir, "report.html")
         data = self._gather_data()
-        with open(report_path, "w") as fh:
+        with open(report_path, "w", encoding="utf-8") as fh:
             fh.write(self._build_html(data))
         return report_path
 
@@ -278,7 +279,7 @@ class HTMLReportGenerator:
 <body>
 <div class="container">
   <div class="header">
-    <h1>🔎 SyncHunt Report</h1>
+    <h1>🔎 SyncHunt - {e(t('report.title'))}</h1>
     <div class="target">{e(str(data['target']))}</div>
     <div class="meta">
       Scan start: {e(str(data['scan_start']))} · Duration: {e(data['duration'])}<br>

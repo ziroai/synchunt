@@ -25,13 +25,13 @@ def test_enrichment_profiles_a_live_host(ctx, local_server):
 
     hosts_file = ctx.path("intel", "hosts.json")
     assert os.path.exists(hosts_file)
-    records = json.load(open(hosts_file))
+    records = json.load(open(hosts_file, encoding="utf-8"))
     record = next(r for r in records if r["host"] == "127.0.0.1")
     assert record["status"] == 200
     assert record["server"] or record["powered_by"]
     assert any("/admin" in entry["url"] for entry in record["interesting_paths"])
 
-    interesting = open(ctx.path("intel", "interesting_paths.txt")).read()
+    interesting = open(ctx.path("intel", "interesting_paths.txt"), encoding="utf-8").read()
     assert "/admin" in interesting
 
     findings = ctx.database.findings(ctx.scan_id)
@@ -64,11 +64,11 @@ def test_api_introspection_finds_spec_and_graphql(ctx, local_server):
     ctx.set_file("live_hosts", ctx.path("dns", "live_hosts.txt"))
     APIIntrospector(ctx).run_all()
 
-    specs = json.load(open(ctx.path("api_intelligence", "api_specs.json")))
+    specs = json.load(open(ctx.path("api_intelligence", "api_specs.json"), encoding="utf-8"))
     assert any(spec["title"] == "Test API" for spec in specs)
     assert any(spec["endpoint_count"] == 2 for spec in specs)
 
-    graphql = json.load(open(ctx.path("api_intelligence", "graphql.json")))
+    graphql = json.load(open(ctx.path("api_intelligence", "graphql.json"), encoding="utf-8"))
     assert any(entry["url"].endswith("/graphql") for entry in graphql)
 
     findings = ctx.database.findings(ctx.scan_id)
@@ -98,13 +98,13 @@ def test_cloud_enum_flags_public_bucket(ctx, monkeypatch):
 
     cloud_enum.CloudEnumerator(ctx).run_all()
 
-    results = json.load(open(ctx.path("cloud_enum", "aws.json")))
+    results = json.load(open(ctx.path("cloud_enum", "aws.json"), encoding="utf-8"))
     names = {entry["name"]: entry for entry in results}
     assert names["example-public"]["public"] is True
     assert names["example-private"]["public"] is False
     assert "example-absent" not in names
 
-    public = open(ctx.path("cloud_enum", "public_buckets.txt")).read()
+    public = open(ctx.path("cloud_enum", "public_buckets.txt"), encoding="utf-8").read()
     assert "example-public" in public
 
     findings = ctx.database.findings(ctx.scan_id)
@@ -170,7 +170,7 @@ def test_js_analysis_detects_secrets_from_disk(ctx):
 
     js_dir = ctx.path("js_analysis", "files")
     os.makedirs(js_dir, exist_ok=True)
-    with open(os.path.join(js_dir, "app.js"), "w") as fh:
+    with open(os.path.join(js_dir, "app.js"), "w", encoding="utf-8") as fh:
         fh.write(
             "const key='AKIAIOSFODNN7EXAMPLE';\n"
             "const token='TESTTOKEN_abcdefghijklmnop';\n"
@@ -182,14 +182,14 @@ def test_js_analysis_detects_secrets_from_disk(ctx):
 
     JSAnalyzer(ctx).run_all()
 
-    secrets = json.load(open(ctx.path("js_analysis", "secrets", "custom_regex.json")))
+    secrets = json.load(open(ctx.path("js_analysis", "secrets", "custom_regex.json"), encoding="utf-8"))
     types = {entry["type"] for entry in secrets}
     assert "AWS Access Key" in types
     assert "Test Token" in types, "custom config patterns must be honoured"
     # values are redacted on disk
     assert all("AKIAIOSFODNN7EXAMPLE" not in entry["value"] for entry in secrets)
 
-    endpoints = open(ctx.path("js_analysis", "endpoints", "all_endpoints.txt")).read()
+    endpoints = open(ctx.path("js_analysis", "endpoints", "all_endpoints.txt"), encoding="utf-8").read()
     assert "/api/v1/users" in endpoints
 
     findings = ctx.database.findings(ctx.scan_id)

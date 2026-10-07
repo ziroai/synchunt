@@ -151,7 +151,7 @@ def test_run_all_deduplicates_and_scores(ctx, tmp_path):
     json_path = os.path.join(ctx.path("findings_prioritized"), "findings.json")
     csv_path = os.path.join(ctx.path("findings_prioritized"), "findings.csv")
     assert os.path.exists(json_path) and os.path.exists(csv_path)
-    with open(json_path) as fh:
+    with open(json_path, encoding="utf-8") as fh:
         rows = json.load(fh)
     assert any(row["priority"] == "P1" for row in rows)
     assert all("score_reasons" in row for row in rows)

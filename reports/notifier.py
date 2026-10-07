@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 import requests
 
+from core.i18n import t
 from core.utils import truncate
 
 MAX_MESSAGE = 3500
@@ -116,11 +117,12 @@ class Notifier:
             )
         self.notify_all("\n".join(lines))
 
-    def send_critical_finding(self, finding: str) -> None:
+    def send_critical_finding(self, finding: str, target: str = "") -> None:
         """Push a critical finding to every enabled channel."""
         if not self.enabled:
             return
-        self.notify_all(f"🚨 CRITICAL FINDING\n\n{truncate(finding, 1500)}", critical=True)
+        heading = t("notify.critical", target=target or "target", title="")
+        self.notify_all(f"🚨 {heading.strip()}\n\n{truncate(finding, 1500)}", critical=True)
 
     def send_critical_findings(self, findings) -> int:
         """Notify about up to 10 critical/high findings; returns count sent."""

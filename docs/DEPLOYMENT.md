@@ -183,3 +183,27 @@ Everything reads files or stdin and prints to stdout, so it composes in shell pi
 - `--dry-run` prints the plan without sending traffic; run it in CI to validate scope/config changes.
 - Rate limits matter: `--rate-limit` and per-tool `rate`/`threads` settings are the knobs to turn down
   when a program asks for polite scanning.
+
+## 9. Platform support
+
+SyncHunt runs on Linux, macOS and Windows with the same command set and the same artifacts.
+
+| Concern | Linux / macOS | Windows |
+|---|---|---|
+| Console encoding | UTF-8, with automatic ASCII fallback for legacy terminals | UTF-8 stdio reconfigured at start-up; ASCII fallback available with `SYNCHUNT_ASCII=1` |
+| Child processes | new session + process group | same environment hygiene via `PYTHONIOENCODING=utf-8` |
+| Tool shutdown | `SIGTERM` → `SIGKILL` to the whole process group | `taskkill /F /T /PID` (tree kill) |
+| File I/O | explicit UTF-8 everywhere | explicit UTF-8 everywhere (byte-identical artifacts) |
+| Verification | `./scripts/check.sh` or `python3 scripts/check.py` | `python3 scripts/check.py` (pure Python) |
+
+Notes and caveats:
+
+- Raw-socket scanners (`naabu`, `nmap -sS`, `masscan`, `rustscan`) require elevated privileges on Linux
+  and macOS; SyncHunt falls back to TCP-connect scans when they are unavailable or unauthorised. On
+  Windows, prefer the Go-based tools (`naabu`, `httpx`, `nuclei`) installed via `scoop`/`choco`.
+- External tools are optional everywhere: a missing binary degrades the phase and is reported by
+  `--doctor` / `--install-deps`.
+- Container images (`Dockerfile`, targets `slim` and default) are Linux-based and run unprivileged; the
+  same code paths are exercised on Windows by the CI matrix.
+- `--doctor` prints a one-line platform summary (OS, release, Python, CPU count) so bug reports can
+  state the exact environment.

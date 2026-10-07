@@ -15,7 +15,7 @@ def test_runner_executes_argv_without_shell(runner, tmp_path):
     )
     assert result["success"] is True
     assert "hello from tool" in result["stdout"]
-    assert open(output).read().strip() == "hello from tool"
+    assert open(output, encoding="utf-8").read().strip() == "hello from tool"
     assert result["result_count"] == 1
 
 

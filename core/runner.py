@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -17,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
 
 from core.logger import BugHuntLogger
+from core.platform_compat import child_env, kill_process_tree, spawn_kwargs
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -134,7 +134,7 @@ class ToolRunner:
 
         start_time = time.time()
         try:
-            run_env = os.environ.copy()
+            run_env = child_env()
             if env:
                 run_env.update(env)
 
@@ -147,7 +147,7 @@ class ToolRunner:
                 cwd=cwd,
                 env=run_env,
                 shell=shell,
-                preexec_fn=None if (IS_WINDOWS or shell) else os.setsid,
+                **spawn_kwargs(shell),
             )
             self.running_processes.append(process)
 
@@ -169,7 +169,7 @@ class ToolRunner:
             if output_file and stdout:
                 os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
                 mode = "a" if append else "w"
-                with open(output_file, mode) as fh:
+                with open(output_file, mode, encoding="utf-8") as fh:
                     fh.write(stdout)
 
             result_count = sum(1 for line in (stdout or "").splitlines() if line.strip())
@@ -281,19 +281,8 @@ class ToolRunner:
 
     # ------------------------------------------------------------------
     def _kill_process_group(self, process: subprocess.Popen) -> None:
-        try:
-            if IS_WINDOWS:
-                process.kill()
-                return
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-            time.sleep(1.5)
-            if process.poll() is None:
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except Exception:
-            try:
-                process.kill()
-            except Exception:
-                pass
+        """Terminate the tool and its children (process group on POSIX, taskkill on Windows)."""
+        kill_process_tree(process)
 
     def cleanup(self) -> None:
         """Kill every process still owned by this runner."""

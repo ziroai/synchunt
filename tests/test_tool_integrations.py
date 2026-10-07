@@ -43,7 +43,7 @@ def _install_fake_runner(ctx, outputs=None):
 
 def _write_output(path, lines):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 
 
@@ -113,7 +113,7 @@ def test_arjun_parameter_json_becomes_fuzz_urls(ctx):
     phase = ContentDiscovery(ctx)
     raw_dir = os.path.join(phase.params_dir, "arjun")
     os.makedirs(raw_dir, exist_ok=True)
-    with open(os.path.join(raw_dir, "example.com.json"), "w") as fh:
+    with open(os.path.join(raw_dir, "example.com.json"), "w", encoding="utf-8") as fh:
         json.dump({"https://example.com/search": ["q", "page"]}, fh)
 
     commands = _install_fake_runner(ctx)
@@ -131,7 +131,7 @@ def test_jsluice_endpoints_are_collected(ctx):
 
     phase = JSAnalyzer(ctx)
     os.makedirs(phase.files_dir, exist_ok=True)
-    with open(os.path.join(phase.files_dir, "app.js"), "w") as fh:
+    with open(os.path.join(phase.files_dir, "app.js"), "w", encoding="utf-8") as fh:
         fh.write("fetch('/api/v1/users')")
 
     commands = _install_fake_runner(
@@ -149,7 +149,7 @@ def test_trufflehog_secrets_are_recorded_and_redacted(ctx):
 
     phase = JSAnalyzer(ctx)
     os.makedirs(phase.files_dir, exist_ok=True)
-    with open(os.path.join(phase.files_dir, "app.js"), "w") as fh:
+    with open(os.path.join(phase.files_dir, "app.js"), "w", encoding="utf-8") as fh:
         fh.write("k='AKIAIOSFODNN7EXAMPLE'")
 
     record = {
@@ -178,7 +178,7 @@ def test_gitleaks_report_is_parsed(ctx):
     os.makedirs(phase.files_dir, exist_ok=True)
     report = os.path.join(phase.output_dir, "secrets", "gitleaks.json")
     os.makedirs(os.path.dirname(report), exist_ok=True)
-    with open(report, "w") as fh:
+    with open(report, "w", encoding="utf-8") as fh:
         json.dump([{"RuleID": "generic-api-key", "Secret": "supersecretvalue123",
                     "File": "app.js"}], fh)
 
@@ -204,7 +204,7 @@ def test_wapiti_json_becomes_findings(ctx):
     scanner = VulnScanner(ctx)
     report = os.path.join(scanner.output_dir, "wapiti", "example.com.json")
     os.makedirs(os.path.dirname(report), exist_ok=True)
-    with open(report, "w") as fh:
+    with open(report, "w", encoding="utf-8") as fh:
         json.dump({
             "vulnerabilities": {
                 "SQL Injection": [
@@ -263,7 +263,7 @@ def test_wpscan_reports_plugins_and_core_cves(ctx):
     scanner = VulnScanner(ctx)
     report = os.path.join(scanner.output_dir, "wpscan", "blog.example.com.json")
     os.makedirs(os.path.dirname(report), exist_ok=True)
-    with open(report, "w") as fh:
+    with open(report, "w", encoding="utf-8") as fh:
         json.dump({
             "target_url": "https://blog.example.com/",
             "version": {"number": "6.4.1"},
@@ -295,7 +295,7 @@ def test_no_integration_uses_a_shell(ctx):
     for name in ("subdomain_enum", "port_scanning", "content_discovery",
                  "js_analysis", "vuln_scanning", "subdomain_takeover"):
         with open(os.path.join(os.path.dirname(__file__), "..", "modules",
-                               f"{name}.py")) as fh:
+                               f"{name}.py"), encoding="utf-8") as fh:
             source += fh.read()
     assert "shell=True" not in source
     assert subprocess is not None

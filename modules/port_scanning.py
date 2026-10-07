@@ -206,7 +206,7 @@ class PortScanner:
         for name in os.listdir(output_dir):
             if not name.endswith(".gnmap"):
                 continue
-            with open(os.path.join(output_dir, name), "r", errors="ignore") as fh:
+            with open(os.path.join(output_dir, name), "r", errors="ignore", encoding="utf-8") as fh:
                 for line in fh:
                     if "Ports:" not in line:
                         continue

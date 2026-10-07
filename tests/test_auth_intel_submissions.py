@@ -260,13 +260,13 @@ def test_submission_exports_are_written(ctx):
 
     assert set(generated) == {"hackerone", "intigriti", "bugcrowd"}
 
-    hackerone = json.load(open(generated["hackerone"]))
+    hackerone = json.load(open(generated["hackerone"], encoding="utf-8"))
     report = hackerone["reports"][0]
     assert report["severity"] == "critical"
     assert "SQL injection" in report["title"]
     assert "### Reproduction" in report["vulnerability_information"]
 
-    bugcrowd = open(generated["bugcrowd"]).read()
+    bugcrowd = open(generated["bugcrowd"], encoding="utf-8").read()
     assert "P1" in bugcrowd and "P4" in bugcrowd
     assert "SQL injection in /item" in bugcrowd
 

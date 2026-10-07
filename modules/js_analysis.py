@@ -115,7 +115,7 @@ class JSAnalyzer:
             if not name.endswith(".js"):
                 name += ".js"
             path = os.path.join(self.files_dir, f"{short_hash(url, length=6)}_{name}")
-            with open(path, "w", errors="ignore") as fh:
+            with open(path, "w", errors="ignore", encoding="utf-8") as fh:
                 fh.write(result.text)
             if self.check_sourcemaps and "sourceMappingURL=" in result.text:
                 self._check_sourcemap(url, result.text)
@@ -193,7 +193,7 @@ class JSAnalyzer:
         output_file = os.path.join(raw_dir, "jsluice.jsonl")
 
         self.logger.info("Running jsluice endpoint extraction...")
-        with open(output_file, "w") as fh:
+        with open(output_file, "w", encoding="utf-8") as fh:
             for name in sorted(os.listdir(self.files_dir)):
                 path = os.path.join(self.files_dir, name)
                 if not os.path.isfile(path):
@@ -224,7 +224,7 @@ class JSAnalyzer:
              "--no-verification", "--log-level", "-1"],
             tool_name="trufflehog", timeout=900,
         )
-        with open(output_file, "w") as fh:
+        with open(output_file, "w", encoding="utf-8") as fh:
             for line in (result.get("stdout") or "").splitlines():
                 if line.strip().startswith("{"):
                     fh.write(line + "\n")
@@ -337,7 +337,7 @@ class JSAnalyzer:
             if not os.path.isfile(path):
                 continue
             try:
-                with open(path, "r", errors="ignore") as fh:
+                with open(path, "r", errors="ignore", encoding="utf-8") as fh:
                     content = fh.read()
             except OSError as exc:
                 self.logger.debug(f"could not read {name}: {exc}")

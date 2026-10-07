@@ -6,6 +6,8 @@ Colored terminal output + file logging, plus result/vuln/found helpers.
 from __future__ import annotations
 
 import logging
+
+from core.platform_compat import configure_stdio, sanitize
 import os
 import sys
 from datetime import datetime
@@ -48,10 +50,25 @@ class FileFormatter(logging.Formatter):
 class BugHuntLogger:
     """Main logger used across the framework."""
 
+    def _emit(self, text: str) -> None:
+        """Console output, degraded to ASCII on consoles that need it."""
+        print(sanitize(text))
+
+    def _log_to_file(self, level: str, msg: str) -> None:
+        """Record an event in the file log without echoing it to the console."""
+        for handler in list(self.logger.handlers):
+            if isinstance(handler, logging.FileHandler):
+                record = self.logger.makeRecord(
+                    self.logger.name, getattr(logging, level, logging.INFO),
+                    "(file)", 0, msg, None, None,
+                )
+                handler.handle(record)
+
     def __init__(self, name: str = "SyncHunt", output_dir: str = "output",
                  verbose: bool = True):
         self.output_dir = output_dir
         self.verbose = verbose
+        configure_stdio()
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG if verbose else logging.INFO)
         self.logger.propagate = False
@@ -80,7 +97,7 @@ class BugHuntLogger:
             if self.file_handler is not None:
                 self.logger.removeHandler(self.file_handler)
                 self.file_handler.close()
-            handler = logging.FileHandler(log_file)
+            handler = logging.FileHandler(log_file, encoding="utf-8")
             handler.setLevel(logging.DEBUG)
             handler.setFormatter(FileFormatter())
             self.logger.addHandler(handler)
@@ -107,7 +124,7 @@ class BugHuntLogger:
         self.logger.critical(msg)
 
     # ------------------------------------------------------------------
-    def banner(self, version: str = "2.0.0") -> None:
+    def banner(self, version: str = "2.1.0") -> None:
         banner_text = f"""
 {Fore.RED}{Style.BRIGHT}
 ╔══════════════════════════════════════════════════════════════╗
@@ -122,7 +139,7 @@ class BugHuntLogger:
 ║            {Fore.CYAN}   v{version} | authorized testing only{Fore.RED}              ║
 ╚══════════════════════════════════════════════════════════════╝
 {Style.RESET_ALL}"""
-        print(banner_text)
+        self._emit(banner_text)
 
     def phase_banner(self, phase_name: str, phase_num: Optional[int] = None,
                      extra: str = "") -> None:
@@ -134,46 +151,46 @@ class BugHuntLogger:
         padding = max(0, width - len(msg) - 4)
         left_pad = padding // 2
         right_pad = padding - left_pad
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}")
-        print("═" * width)
-        print(f"║ {' ' * left_pad}{msg}{' ' * right_pad} ║")
-        print("═" * width)
-        print(f"{Style.RESET_ALL}")
+        self._emit(f"\n{Fore.CYAN}{Style.BRIGHT}")
+        self._emit("═" * width)
+        self._emit(f"║ {' ' * left_pad}{msg}{' ' * right_pad} ║")
+        self._emit("═" * width)
+        self._emit(f"{Style.RESET_ALL}")
 
     def result(self, msg: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(
+        self._emit(
             f"{Fore.WHITE}[{timestamp}] "
             f"{Fore.MAGENTA}📌 [RESULT  ]{Style.RESET_ALL} "
             f"{Fore.MAGENTA}{msg}{Style.RESET_ALL}"
         )
-        self.logger.info(f"[RESULT] {msg}")
+        self._log_to_file("INFO", f"[RESULT] {msg}")
 
     def found(self, msg: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(
+        self._emit(
             f"{Fore.WHITE}[{timestamp}] "
             f"{Fore.GREEN}🎯 [ FOUND  ]{Style.RESET_ALL} "
             f"{Fore.GREEN}{msg}{Style.RESET_ALL}"
         )
-        self.logger.info(f"[FOUND] {msg}")
+        self._log_to_file("INFO", f"[FOUND] {msg}")
 
     def vuln(self, msg: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(
+        self._emit(
             f"{Fore.WHITE}[{timestamp}] "
             f"{Fore.RED}{Style.BRIGHT}🚨 [  VULN  ]{Style.RESET_ALL} "
             f"{Fore.RED}{Style.BRIGHT}{msg}{Style.RESET_ALL}"
         )
-        self.logger.critical(f"[VULN] {msg}")
+        self._log_to_file("CRITICAL", f"[VULN] {msg}")
 
     def skip(self, msg: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(
+        self._emit(
             f"{Fore.WHITE}[{timestamp}] "
             f"{Fore.YELLOW}⏭️  [ SKIP   ]{Style.RESET_ALL} {msg}"
         )
-        self.logger.info(f"[SKIP] {msg}")
+        self._log_to_file("INFO", f"[SKIP] {msg}")
 
     def progress(self, current: int, total: int, tool_name: str = "") -> None:
         total = max(1, int(total))

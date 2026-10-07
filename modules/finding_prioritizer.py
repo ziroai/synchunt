@@ -540,7 +540,7 @@ class FindingPrioritizer:
 
         markdown = self._render_markdown(findings)
         md_file = os.path.join(self.output_dir, "prioritized.md")
-        with open(md_file, "w") as fh:
+        with open(md_file, "w", encoding="utf-8") as fh:
             fh.write(markdown)
         self.ctx.set_file("prioritized_md", md_file)
 

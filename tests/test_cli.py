@@ -220,7 +220,7 @@ def test_result_count_reads_jsonl_artifacts(config_path, ctx):
     args = cli.parse_arguments(["-d", "example.com", "--config", config_path])
     app = cli.SyncHunt(args)
     jsonl = ctx.path("ports", "naabu.jsonl")
-    with open(jsonl, "w") as fh:
+    with open(jsonl, "w", encoding="utf-8") as fh:
         fh.write('{"port": 80, "host": "example.com"}\n')
         fh.write('{"port": 443, "host": "example.com"}\n')
         fh.write("not json\n")

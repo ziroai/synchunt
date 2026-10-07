@@ -98,7 +98,7 @@ def test_file_helpers_roundtrip(tmp_path):
 
 def test_jsonl_reader_skips_junk(tmp_path):
     path = str(tmp_path / "out.jsonl")
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write('{"a": 1}\n')
         fh.write("not json\n")
         fh.write("[1, 2]\n")

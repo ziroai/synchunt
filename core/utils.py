@@ -115,7 +115,7 @@ def read_file_lines(filepath):
     """Read file and return non-empty, stripped lines."""
     if not filepath or not os.path.exists(filepath):
         return []
-    with open(filepath, "r", errors="ignore") as f:
+    with open(filepath, "r", errors="ignore", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
 
 
@@ -124,7 +124,7 @@ def write_file_lines(filepath, lines, deduplicate=True):
     ensure_dir(os.path.dirname(filepath))
     if deduplicate:
         lines = list(dict.fromkeys(lines))
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         if lines:
             f.write("\n".join(lines) + "\n")
     return len(lines)
@@ -134,7 +134,7 @@ def append_file_lines(filepath, lines):
     """Append lines to file. Returns number written."""
     ensure_dir(os.path.dirname(filepath))
     count = 0
-    with open(filepath, "a") as f:
+    with open(filepath, "a", encoding="utf-8") as f:
         for line in lines:
             line = line.strip()
             if line:
@@ -164,7 +164,7 @@ def get_file_count(filepath):
     if not filepath or not os.path.exists(filepath):
         return 0
     count = 0
-    with open(filepath, "r", errors="ignore") as f:
+    with open(filepath, "r", errors="ignore", encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 count += 1
@@ -176,7 +176,7 @@ def read_json_lines(filepath):
     records = []
     if not filepath or not os.path.exists(filepath):
         return records
-    with open(filepath, "r", errors="ignore") as f:
+    with open(filepath, "r", errors="ignore", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line[0] not in "{[":
@@ -193,7 +193,7 @@ def read_json_lines(filepath):
 def save_json(data, filepath):
     """Save data as JSON file."""
     ensure_dir(os.path.dirname(filepath))
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, default=str)
     return filepath
 
@@ -203,7 +203,7 @@ def load_json(filepath, default=None):
     if not filepath or not os.path.exists(filepath):
         return {} if default is None else default
     try:
-        with open(filepath, "r", errors="ignore") as f:
+        with open(filepath, "r", errors="ignore", encoding="utf-8") as f:
             return json.load(f)
     except ValueError:
         return {} if default is None else default
@@ -221,7 +221,7 @@ def save_csv(rows, filepath, fieldnames=None):
             for key in row:
                 if key not in fieldnames:
                     fieldnames.append(key)
-    with open(filepath, "w", newline="") as f:
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         for row in rows:

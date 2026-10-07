@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from core.i18n import t
 from core.models import Finding
 from core.utils import fenced_block, format_duration, load_json, read_file_lines
 
@@ -60,7 +61,7 @@ class MarkdownReportGenerator:
             duration = format_duration((self.scan_end - self.scan_start).total_seconds())
 
         lines: List[str] = [
-            "# 🔎 SyncHunt Report",
+            f"# 🔎 SyncHunt - {t('report.title')}",
             "",
             f"**Target:** `{self.target}`  ",
             f"**Scan start:** {self.scan_start}  ",
@@ -70,7 +71,7 @@ class MarkdownReportGenerator:
             "> Findings are heuristic and require manual verification. "
             "Only test systems you are authorised to test.",
             "",
-            "## 📊 Summary",
+            f"## 📊 {t('summary.title')}",
             "",
         ]
 
@@ -95,7 +96,7 @@ class MarkdownReportGenerator:
         if history.get("previous_run"):
             counts = history.get("counts") or {}
             lines += [
-                "## 🕓 Since last scan",
+                f"## 🕓 {t('report.history')}",
                 "",
                 f"Compared with `{os.path.basename(str(history['previous_run']))}`: "
                 f"**{counts.get('new', 0)} new**, **{counts.get('fixed', 0)} fixed**, "
@@ -145,7 +146,7 @@ class MarkdownReportGenerator:
 
         if findings:
             lines += [
-                "## 🎯 Prioritised findings",
+                f"## 🎯 {t('report.findings')}",
                 "",
                 "| Priority | Score | Severity | Category | Title | Location |",
                 "|----------|-------|----------|----------|-------|----------|",
@@ -165,7 +166,7 @@ class MarkdownReportGenerator:
                 )
             lines.append("")
 
-            lines.append("## 🔍 Finding detail")
+            lines.append(f"## 🔍 {t('report.findings')} - detail")
             lines.append("")
             for finding in findings[:20]:
                 lines.append(f"### {finding.get('title') or 'finding'}")
@@ -209,6 +210,6 @@ class MarkdownReportGenerator:
         )
         lines.append("")
 
-        with open(report_path, "w") as fh:
+        with open(report_path, "w", encoding="utf-8") as fh:
             fh.write("\n".join(lines))
         return report_path

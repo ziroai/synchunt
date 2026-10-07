@@ -49,14 +49,14 @@ class ConfigManager:
             raise FileNotFoundError(
                 f"Configuration file not found: {self.config_path}"
             )
-        with open(self.config_path, "r") as f:
+        with open(self.config_path, "r", encoding="utf-8") as f:
             self.config = yaml.safe_load(f) or {}
         if not self.config:
             raise ValueError("Configuration file is empty or invalid.")
 
     def save_config(self, path: Optional[str] = None) -> None:
         save_path = path or self.config_path
-        with open(save_path, "w") as f:
+        with open(save_path, "w", encoding="utf-8") as f:
             yaml.dump(self.config, f, default_flow_style=False, indent=2, sort_keys=False)
 
     # ------------------------------------------------------------------

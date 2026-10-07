@@ -197,7 +197,7 @@ def test_oob_interactions_become_findings(ctx):
     assert "203.0.113.7" in finding.evidence
     assert dummy.stopped is True
 
-    records = json.load(open(ctx.path("vulnerabilities", "oob_interactions.json")))
+    records = json.load(open(ctx.path("vulnerabilities", "oob_interactions.json"), encoding="utf-8"))
     assert records[0]["provider"] == "webhook"
 
 

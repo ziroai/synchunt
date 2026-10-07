@@ -36,7 +36,7 @@ def test_html_report_escapes_attacker_controlled_content(ctx):
         database=ctx.database, scan_id=ctx.scan_id,
     ).generate()
 
-    html = open(path).read()
+    html = open(path, encoding="utf-8").read()
     assert "<script>alert(document.domain)</script>" not in html
     assert "&lt;script&gt;" in html
     assert "onerror" not in html.replace("&lt;", "")
@@ -58,7 +58,7 @@ def test_html_report_renders_severity_and_priority_summary(ctx):
         database=ctx.database, scan_id=ctx.scan_id,
         findings=ctx.database.findings(ctx.scan_id),
     ).generate()
-    html = open(path).read()
+    html = open(path, encoding="utf-8").read()
     assert "Critical" in html
     assert "AWS key" in html
     assert "P1" in html or "P2" in html
@@ -73,7 +73,7 @@ def test_markdown_report_contains_tables_and_details(ctx):
         ctx.output_dir, ctx.target, datetime.now(), datetime.now(),
         database=ctx.database, scan_id=ctx.scan_id,
     ).generate()
-    text = open(path).read()
+    text = open(path, encoding="utf-8").read()
     assert "SQL injection" in text
     assert "Subdomains" in text
     assert text.count("```") % 2 == 0  # balanced code fences
@@ -93,12 +93,12 @@ def test_data_exporter_writes_json_and_csv(ctx):
     assert os.path.exists(paths["findings_csv"])
     assert os.path.exists(scan_path)
 
-    with open(paths["findings_json"]) as fh:
+    with open(paths["findings_json"], encoding="utf-8") as fh:
         rows = json.load(fh)
     assert len(rows) == 2
     assert {"fingerprint", "severity", "title"} <= set(rows[0])
 
-    header = open(paths["findings_csv"]).readline()
+    header = open(paths["findings_csv"], encoding="utf-8").readline()
     assert "fingerprint" in header and "severity" in header
 
 
@@ -217,7 +217,7 @@ def test_sarif_export_is_valid_and_maps_severities(tmp_path):
     path = SarifExporter(str(tmp_path), "example.com", findings,
                          tool_version="9.9.9").generate()
     assert os.path.exists(path)
-    doc = jsonlib.load(open(path))
+    doc = jsonlib.load(open(path, encoding="utf-8"))
     run = doc["runs"][0]
 
     assert doc["version"] == "2.1.0"
@@ -326,7 +326,7 @@ def test_reports_render_history_section(tmp_path):
         str(tmp_path), "example.com", None, None, findings=findings,
         history=history,
     ).generate()
-    html_text = open(html_path).read()
+    html_text = open(html_path, encoding="utf-8").read()
     assert "Since last scan" in html_text
     assert "&lt;b&gt;issue&lt;/b&gt;" in html_text  # history entries are escaped too
 
@@ -334,7 +334,7 @@ def test_reports_render_history_section(tmp_path):
         str(tmp_path), "example.com", None, None, findings=findings,
         history=history,
     ).generate()
-    markdown = open(md_path).read()
-    assert "Since last scan" in markdown
+    markdown = open(md_path, encoding="utf-8").read()
+    assert "Compared to the previous scan" in markdown
     assert "1 new" in markdown and "2 fixed" in markdown
     assert markdown.count("```") % 2 == 0

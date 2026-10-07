@@ -191,7 +191,7 @@ def test_theharvester_hosts_and_emails(ctx):
 
     enumerator = SubdomainEnumerator(ctx)
     base = os.path.join(enumerator.output_dir, "theharvester.json")
-    with open(base, "w") as handle:
+    with open(base, "w", encoding="utf-8") as handle:
         json.dump({
             "hosts": ["api.example.com:1.2.3.4", "other.test"],
             "emails": ["security@example.com", "nope"],
@@ -203,7 +203,7 @@ def test_theharvester_hosts_and_emails(ctx):
     assert commands[0][0] in ("theHarvester", "theharvester")
     assert found == ["api.example.com"]
     emails = ctx.path("subdomains", "emails.txt")
-    assert "security@example.com" in open(emails).read()
+    assert "security@example.com" in open(emails, encoding="utf-8").read()
 
 
 def test_censys_needs_keys_and_parses_hits(ctx, monkeypatch):
@@ -246,7 +246,7 @@ def test_dnsrecon_records_and_zone_transfer(ctx):
 
     ctx.config.set("subdomain_validation.dnsrecon.enabled", True)
     validator = SubdomainValidator(ctx)
-    with open(os.path.join(validator.output_dir, "dnsrecon.json"), "w") as handle:
+    with open(os.path.join(validator.output_dir, "dnsrecon.json"), "w", encoding="utf-8") as handle:
         json.dump([
             {"type": "A", "name": "api.example.com", "address": "1.2.3.4"},
             {"type": "NS", "name": "ns1.example.com", "target": "ns1.example.com"},
@@ -312,7 +312,7 @@ def test_gf_classification_writes_buckets(ctx):
     phase.classify_urls()
 
     pattern_dir = os.path.join(phase.output_dir, "patterns")
-    index = json.load(open(os.path.join(pattern_dir, "index.json")))
+    index = json.load(open(os.path.join(pattern_dir, "index.json"), encoding="utf-8"))
     assert index["buckets"]["idor"] == 1
     assert index["buckets"]["ssrf"] == 1
     assert "idor.txt" in os.listdir(pattern_dir)

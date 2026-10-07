@@ -151,8 +151,8 @@ def test_run_all_writes_artifacts_and_findings(ctx, monkeypatch):
     phase = SubdomainTakeover(ctx)
     phase.run_all()
 
-    candidates = json.load(open(ctx.path("takeover", "candidates.json")))
-    summary = json.load(open(ctx.path("takeover", "summary.json")))
+    candidates = json.load(open(ctx.path("takeover", "candidates.json"), encoding="utf-8"))
+    summary = json.load(open(ctx.path("takeover", "summary.json"), encoding="utf-8"))
     assert len(candidates) == 1
     assert candidates[0]["host"] == "shop.example.com"
     assert summary["confirmed"] == 1
@@ -167,7 +167,7 @@ def test_run_all_without_subdomains_is_a_noop(ctx, monkeypatch):
     phase = SubdomainTakeover(ctx)
     phase.run_all()
     assert phase.findings == []
-    assert json.load(open(ctx.path("takeover", "candidates.json"))) == []
+    assert json.load(open(ctx.path("takeover", "candidates.json"), encoding="utf-8")) == []
 
 
 def test_scope_filter_is_enforced(ctx, monkeypatch):

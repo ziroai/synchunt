@@ -29,11 +29,19 @@ main.py                      CLI + orchestrator (phase registry, resume, reports
 │   ├── history.py           re-scan diffing (new / fixed / persisting)
 │   ├── utils.py             scope/domain/URL helpers, IO, shell-free command helpers
 │   ├── logger.py            console + per-run file logging
+│   ├── auth.py              --cookie/--header handling (values never logged)
+│   ├── threatintel.py       CISA KEV + FIRST EPSS lookup and scoring bonus
+│   ├── i18n.py              language catalogues and translation lookup
+│   ├── platform_compat.py   UTF-8 console, child env, cross-platform process control
 │   └── dependency_checker.py external tool detection and install hints
 │
 └── reports/                 html_report, markdown_report, data_export,
-                             sarif_export, notifier
+                             sarif_export, submission_export, notifier
 ```
+
+Offline helpers for tools that are not safe or meaningful to run automatically live in `tools_cli.py`
+(`synchunt-tools`): `dedupe` (anew), `unfurl`, `gf` pattern matching, `meg` URL matrices, Postman
+collection parsing and hashcat/john preflight.
 
 Dependency direction is one-way: `modules → core → (stdlib)`, and `reports → core`. Nothing in `core/` imports a phase module.
 
@@ -177,3 +185,30 @@ CLI flags override config values; environment variables can supply secrets (GitH
 - Reports escape every interpolated value and set a restrictive CSP meta tag.
 - Secrets found during scanning are redacted before they are written to reports; the raw corpus stays in the run directory.
 - `--dry-run` prints the plan and exits before any traffic is sent.
+
+## 13. Internationalisation
+
+- `core/i18n.py` holds one catalogue per language (`en`, `es`, `fr`, `de`, `pt`, `hi`, `ja`, `zh`) under
+  dotted keys (`cli.*`, `summary.*`, `report.*`, `notify.*`). `t()` looks up the current language, falls
+  back to English, then to the key itself — a missing or malformed entry can never raise.
+- Resolution order: `--lang` → `general.language` in `config.yaml` → `SYNCHUNT_LANG` → `LANG` → English.
+- Only human-readable text is translated. Tool names, phase identifiers, config keys, file names and
+  JSON/CSV field names stay English so automation and CI parsing are language-independent.
+- `main.py` translates the CLI status lines; `reports/markdown_report.py`, `reports/html_report.py` and
+  `reports/notifier.py` translate their human-facing headings. `--list-languages` prints the catalogue in
+  its own language.
+
+## 14. Platform compatibility
+
+- `core/platform_compat.py` is the single place that knows about the operating system:
+  - `configure_stdio()` reconfigures stdio to UTF-8 where the runtime supports it, and `sanitize()`
+    degrades box-drawing and emoji to ASCII when needed (`SYNCHUNT_ASCII=1`, non-UTF-8 consoles).
+  - `child_env()` gives every subprocess `PYTHONIOENCODING=utf-8` / `PYTHONUTF8=1` so tool output parses
+    identically everywhere; `spawn_kwargs()` creates a new session/process group on POSIX only.
+  - `kill_process_tree()` terminates a tool *and its children* — `killpg` on POSIX, `taskkill /F /T` on
+    Windows — so a timed-out scanner cannot leave orphan processes behind.
+  - `platform_summary()` reports OS, release, Python and CPU count (surfaced by `--doctor`).
+- Every text read/write in the framework passes an explicit `encoding="utf-8"`, which makes artifacts
+  byte-identical across platforms.
+- `scripts/check.py` is the OS-neutral verification runner (bash is not required); `scripts/check.sh`
+  wraps it for POSIX environments.

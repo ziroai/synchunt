@@ -1,241 +1,229 @@
 <div align="center">
 
-![SyncHunt Banner](https://img.shields.io/badge/SyncHunt-All--in--One%20Recon%20%26%20Vuln%20Scanning-ff6b6b?style=for-the-badge&logoColor=white)
+<img src="docs/assets/banner.svg" alt="SyncHunt" width="720">
 
-# ⚔️ SyncHunt v2 — Automated Recon & Vulnerability Scanning Framework
+# SyncHunt
 
-[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776ab?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![License MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+**One command from a domain to a triaged, reportable engagement.**
+
+Automated reconnaissance and vulnerability scanning — subdomain discovery, live-host validation, asset
+intelligence, port and service scanning, OSINT, content/API/JavaScript analysis, vulnerability scanning,
+prioritisation, reporting and notifications — in a single, dependency-tolerant Python framework.
+
 [![CI](https://github.com/ziroai/synchunt/actions/workflows/ci.yml/badge.svg)](https://github.com/ziroai/synchunt/actions/workflows/ci.yml)
-[![Platform Linux/macOS](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-black?style=for-the-badge&logo=linux)](https://github.com/ziroai/synchunt)
+[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-3776ab?logo=python&logoColor=white)](https://www.python.org/)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-1f6feb)](docs/DEPLOYMENT.md#9-platform-support)
+[![Languages](https://img.shields.io/badge/output%20languages-8-8a5cf6)](docs/ARCHITECTURE.md#13-internationalisation)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tool coverage](https://img.shields.io/badge/tool%20coverage-81%25%20(63%2F78)-orange)](docs/TOOL-COVERAGE.md)
 
-**One framework for the whole recon-to-report workflow**: subdomain discovery, live-host validation, asset intelligence, port and service scanning, fingerprinting, GitHub/cloud OSINT, content and API discovery, JavaScript analysis, vulnerability scanning, prioritisation, reporting and notifications.
-
-> Built for bug-bounty hunters, penetration testers and security researchers working within an authorised scope.
+[Quick start](#-quick-start) ·
+[Usage](#-usage) ·
+[Pipeline](#-pipeline) ·
+[Configuration](#-configuration) ·
+[Automation](#-automation) ·
+[Coverage](#-tool-coverage) ·
+[Docs](#-documentation) ·
+[Legal](#-authorised-testing-only)
 
 </div>
 
 ---
 
-## ✨ Highlights
+## Why SyncHunt
 
-- **16-phase pipeline, one command** — `--profile quick|balanced|full|deep` or pick phases with `--phase a,b,c`.
-- **Out-of-band confirmation** — blind XSS/SSRF/XXE callbacks via webhook.site, interactsh or your own
-  collector (`vuln_scanning.oob`), so blind bugs become high-confidence findings instead of guesses.
-- **API route brute forcing built in** — a 70-path built-in wordlist (supplementable) finds undocumented
-  API routes, with sensitive ones flagged for manual authorisation testing.
-- **Authenticated scanning** — `--cookie "session=..."` and `--header "Authorization: Bearer ..."`
-  (or `general.cookie` / `general.headers`) flow into the shared HTTP session *and* into the tools that
-  accept custom headers (nuclei, httpx, katana, ffuf, ffuf/gobuster/feroxbuster/wfuzz, dalfox, sqlmap,
-  arjun), so authenticated surface is in scope instead of invisible. Values are never logged.
-- **Full interactive-platform hook-up** — `--proxy http://127.0.0.1:8080` routes every HTTP step (the built-in
-  client and every HTTP tool: nuclei, httpx, ffuf, katana, sqlmap, ...) through Burp Suite, OWASP ZAP or
-  mitmproxy (`general.proxy` / `SYNCHUNT_PROXY`). Raw-socket scanners (nmap, masscan, naabu, rustscan) and
-  DNS resolvers cannot use an HTTP proxy and skip it by design; sqlmap, nikto and wpscan get their own
-  `--proxy`/`-useproxy` flag automatically.
-- **Real-world exploitation signal** — CVE findings are checked against **CISA KEV** and **FIRST EPSS**
-  (`finding_prioritizer.threat_intel`), so known-exploited issues sort to the top with the reason attached.
-- **Submission drafts** — the report phase writes HackerOne, Intigriti and Bugcrowd submission formats
-  (`reports/submission_*.json|csv`) ready for a human to evidence-check and submit.
-- **gf-patterns classification built in** — the URL corpus is bucketed into `patterns/ssrf.txt`, `xss.txt`,
-  `sqli.txt`, `lfi.txt`, `redirect.txt`, `ssti.txt`, `idor.txt`, … so the right scanner sees the right URLs.
-- **Exploit intelligence** — findings that reference a CVE are matched against your local Exploit-DB
-  (`searchsploit`), tagged `public-exploit` and scored up (`findings_prioritized/exploits.json`).
-- **Offline helper CLI** — `synchunt-tools` covers anew (`dedupe`), unfurl (`unfurl`), gf (`gf`), meg
-  (`meg-urls`), Postman collections (`postman`) and hashcat/john preflight (`hash-id`, `identify`).
-- **Subdomain-takeover detection built in** — CNAME chains matched against 20 takeover-prone services
-  (fingerprints and claimability rules from can-i-take-over-xyz), no binaries required.
-- **Scope enforced before active tooling** — wildcard domains, IPs/CIDRs and `host:port` entries; in-scope/out-of-scope files; nothing leaves your scope.
-- **SQLite correlation store** — every scan writes `synchunt_results.db` (scans, phases, assets, findings) with fingerprint-based de-duplication.
-- **Heuristic prioritisation, not just severity** — findings are scored (impact, confidence, exposure, CVSS-style bonuses) and ranked P1–P4 with reasons you can read.
-- **Reports that are ready to share** — dark-theme HTML, Markdown, JSON, CSV and **SARIF 2.1.0** (GitHub code scanning / CI dashboards), plus optional Slack/Discord/Telegram notifications.
-- **Re-scan diffing** — every run is compared against the previous one for the same target: *new*, *fixed* and *persisting* findings are shown in the reports (`reports/history.json`).
-- **CI-native** — `--json-report summary.json` writes a machine-readable run summary (findings, severities, top findings, artifact paths, history counts) and the exit code reflects the result.
-- **Resumable** — re-run with `--resume` and completed phases are skipped.
-- **Graceful degradation** — every phase works with the tools you have; missing optional tools are skipped with a clear hint, and several phases have built-in fallbacks (crt.sh, HTTP prober, header fingerprinting, OpenAPI/GraphQL probes, cloud-bucket enumeration).
-- **Safe by construction** — no `shell=True` anywhere in the scanning path, rate-limited HTTP session, redacted secrets in output, escaped report rendering.
-- **Tested** — 174 unit/integration tests, CI across Python 3.9–3.12, plus `./scripts/check.sh`.
+- **16-phase pipeline, one command.** `--profile quick|balanced|full|deep`, or pick exactly what you want
+  with `--phase a,b,c`. Every phase writes structured artifacts the next phase consumes.
+- **Works with what you have.** Each phase uses the best available external tool (subfinder, httpx,
+  naabu, nuclei, katana, ffuf, wpscan, …) and falls back to a built-in implementation when the binary is
+  missing. Nothing hard-fails because a tool is absent — `--doctor` tells you what is missing and why it
+  matters.
+- **Authenticated scanning.** `--cookie "session=…"` and `--header "Authorization: Bearer …"` flow into
+  the shared HTTP session *and* into every tool that accepts custom headers, so authenticated surface is
+  in scope instead of invisible. Header *values* are never written to the console, database or reports.
+- **Evidence, not guesses.** Findings are scored and ranked, blind bugs are confirmed out-of-band
+  (webhook.site / interactsh / your own collector), and CVE findings are enriched with **CISA KEV** and
+  **FIRST EPSS** before anything is called a priority.
+- **Ready to hand over.** HTML/Markdown reports, SARIF for GitHub code scanning, JSON/CSV exports, a
+  SQLite correlation database, re-scan diffing — and HackerOne / Intigriti / Bugcrowd submission drafts.
+- **Runs anywhere.** Linux, macOS and Windows, Python 3.9–3.12, identical artifacts on every platform
+  (UTF-8 I/O everywhere), eight report/CLI languages, Docker images and a GitHub Action.
+
+> **Authorised testing only.** SyncHunt sends real traffic to real hosts. Use it only against systems you
+> own or have explicit written permission to test. See [Authorised testing only](#-authorised-testing-only).
 
 ---
 
-## ⚡ Quick Start
+## 📖 Table of contents
 
-### Requirements
+- [Install](#-install)
+- [Quick start](#-quick-start)
+- [Usage](#-usage)
+- [Pipeline](#-pipeline)
+- [Output](#-output)
+- [Configuration](#-configuration)
+- [Languages](#-languages)
+- [Platform support](#-platform-support)
+- [Automation](#-automation)
+- [Tool coverage](#-tool-coverage)
+- [Documentation](#-documentation)
+- [Development](#-development)
+- [Authorised testing only](#-authorised-testing-only)
 
-- Python **3.9+**
-- Linux/macOS (WSL2 works)
-- Everything else is optional: SyncHunt runs out of the box and uses external tools (`subfinder`, `nuclei`, `nmap`, …) when they are installed.
+---
+
+## 📦 Install
+
+**Requirements:** Python 3.9–3.12 and `pip`. External recon tools are optional — SyncHunt degrades
+gracefully and reports what is missing.
 
 ```bash
-git clone https://github.com/ziroai/synchunt.git
-cd synchunt
+# 1. Framework
+python3 -m pip install .            # or: python3 -m pip install -e ".[dev]" for development
 
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+# 2. Check the environment (Python deps + external tools + config health)
+synchunt --doctor
 
-# Check your environment (python deps + external tools + config)
-python3 main.py --doctor
+# 3. Optional: print the install command for every missing external tool
+synchunt --install-deps
 ```
 
-Prefer a real command on your `PATH`? The repo is also an installable package:
+Prefer containers?
 
 ```bash
-pipx install .          # or: pip install .
-synchunt --doctor       # console script; works outside the checkout
-```
+docker build --target slim -t synchunt:slim .        # framework only
+docker build -t synchunt .                           # + common recon tools (subfinder, httpx, nuclei, …)
 
-Both entry points are equivalent — everything below uses `python3 main.py` for clarity;
-replace it with `synchunt` if you installed the package.
-
-**Docker** (batteries included: framework + subfinder, httpx, dnsx, naabu, nuclei, katana, gobuster, nmap, whatweb):
-
-```bash
-docker build -t synchunt .                       # add --target slim for framework-only
 docker run --rm -v "$PWD/output:/app/output" synchunt -d example.com --profile balanced
+docker run --rm synchunt --doctor
 ```
 
-**GitHub Actions** — the repository is a composite action:
-
-```yaml
-- uses: actions/checkout@v4
-- uses: ziroai/synchunt@main
-  with:
-    target: example.com
-    profile: balanced
-    fail-on: high          # fail the job on high/critical findings
-```
-
-### First scan
+Run it straight from a checkout:
 
 ```bash
-# See the plan without sending a single packet
-python3 main.py -d example.com --dry-run
-
-# Fast recon (subdomain → validation → enrichment → prioritize → report)
+git clone https://github.com/ziroai/synchunt.git && cd synchunt
+python3 -m pip install -r requirements.txt
 python3 main.py -d example.com --profile quick
-
-# Full pipeline
-python3 main.py -d example.com --profile deep
-
-# Results
-ls output/example.com/*/reports/
 ```
-
-### External tools (optional but recommended)
-
-```bash
-sudo apt-get install nmap masscan dnsutils
-
-go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-go install github.com/projectdiscovery/katana/cmd/katana@latest
-
-# wordlists used by puredns/dirsearch/feroxbuster
-./scripts/fetch_wordlists.sh
-```
-
-Interactive platforms plug in through one flag: `synchunt -d example.com --proxy http://127.0.0.1:8080`
-sends every HTTP step (built-in client and HTTP-based tools) through Burp Suite, ZAP or mitmproxy;
-`--cookie` / `--header` authenticate the whole scan.
-
-The offline helpers ship with the package:
-
-```bash
-synchunt-tools dedupe urls.txt              # anew
-synchunt-tools unfurl urls.txt --part keys  # unfurl
-synchunt-tools gf ssrf urls.txt             # gf + gf-patterns
-synchunt-tools meg-urls --hosts h.txt --paths p.txt
-synchunt-tools postman collection.json      # Postman -> URL list
-synchunt-tools hash-id hashes.txt           # hashcat/john preflight
-```
-
-`python3 main.py --check-deps` lists what is installed and what is missing; `--install-deps`
-prints the install commands. Both exit `1` while anything required is missing, so they can gate a
-CI job. SyncHunt deliberately never runs package managers for you.
 
 ---
 
-## 🛠️ Usage
-
-```text
-python3 main.py -d example.com [options]
-```
-
-| Option | Description |
-|---|---|
-| `-d, --domain` | target (comma-separated domains/IPs, accepts `host:port`, CIDR) |
-| `-l, --list` | file with one target per line |
-| `--profile` | `quick` \| `balanced` \| `full` \| `deep` (default from config) |
-| `--phase` | comma-separated phases, e.g. `subdomain,validation,report` |
-| `--full` | run all 16 phases |
-| `--resume` | continue the latest run for this target (completed phases are skipped) |
-| `--dry-run` | print the plan and exit |
-| `--output-dir` | base output directory (default `output/`) |
-| `--json-report PATH` | write a machine-readable JSON summary of the run (CI-friendly) |
-| `--threads`, `--timeout`, `--rate-limit` | concurrency / per-tool timeout / HTTP rate limit |
-| `--scope-file`, `--out-of-scope-file` | scope files loaded on top of `config.yaml` |
-| `--config` | config file path (default `config.yaml`) |
-| `-v`, `-q` | verbose / quiet |
-| `--check-deps`, `--install-deps` | dependency check / install hints (exit `1` if anything missing) |
-| `--doctor` | dependency + configuration health check |
-| `--list-phases`, `--version` | introspection |
-
-Examples:
+## ⚡ Quick start
 
 ```bash
-# Specific phases only
-python3 main.py -d target.com --phase subdomain,validation,api_discovery,prioritize,report
+# Show the plan without sending a single packet
+synchunt -d example.com --dry-run
 
-# Multiple targets
-python3 main.py -l targets.txt --profile balanced --verbose
+# Fast pass: subdomain → validation → enrichment → prioritise → report
+synchunt -d example.com --profile quick
 
-# Resume an interrupted run
-python3 main.py -d target.com --full --resume
+# Full pipeline (16 phases)
+synchunt -d example.com --full
 
-# Custom output location
-python3 main.py -d target.com --profile full --output-dir /data/scans
+# Several targets from a file, resumable
+synchunt -l targets.txt --profile balanced --resume
 
 # CI: machine-readable summary + SARIF for GitHub code scanning
-python3 main.py -d target.com --profile balanced --json-report summary.json
+synchunt -d example.com --profile balanced --json-report summary.json
 ```
 
+> `python3 main.py …` works too if the console script is not on your `PATH`.
 
-### Profiles
-
-| Profile | Phases | Notes |
-|---|---|---|
-| `quick` | 5 | subdomain → validation → enrichment → takeover → report |
-| `balanced` | 12 | quick + portscan, fingerprint, content, api, js, vulnscan |
-| `full` | 15 | balanced + github_recon, cloud_enum, sensitive |
-| `deep` | 16 | everything including screenshots |
-
-`prioritize` and `report` are always appended automatically (reporting needs prioritised findings), so the numbers above already include them.
+Results land in `output/<target>/<timestamp>/` — start with `reports/report.html`, then read
+`findings_prioritized/top_findings.txt` for the ranked shortlist.
 
 ---
 
-## 🔍 Phases & Tooling
+## 🛠 Usage
 
-| # | Phase | What it does | Tools (optional) |
-|---|---|---|---|
-| 1 | `subdomain` | subdomain discovery | subfinder, amass, assetfinder, findomain, chaos, sublist3r, theHarvester, puredns, gotator + built-in crt.sh, SecurityTrails, Shodan DNS, Censys |
-| 2 | `validation` | live host detection | httpx, dnsx, dnsrecon, dnsenum (AXFR) + built-in prober fallback |
-| 3 | `enrichment` | DNS/TLS/header/CDN intel, exposure checks | built-in (uses the shared HTTP layer) |
-| 4 | `takeover` | subdomain takeover: CNAME chains + unclaimed-service fingerprints | built-in + optional subjack |
-| 5 | `portscan` | port & service discovery | naabu, nmap, masscan, rustscan |
-| 6 | `fingerprint` | tech-stack & WAF detection | whatweb, wafw00f, webanalyze + header heuristics |
-| 7 | `github_recon` | repositories, issues, leaked secrets | GitHub API (set `github_recon.token`) |
-| 8 | `content` | crawling, URLs, params, directories | katana, gospider, hakrawler, waybackurls, gau, waymore, paramspider, arjun, x8, dirsearch, feroxbuster, ffuf, gobuster, wfuzz + built-in gf-patterns classification |
-| 9 | `api_discovery` | OpenAPI/Swagger, GraphQL, actuator probes + API route brute force | built-in (70-path wordlist) |
-| 10 | `jsanalysis` | JS endpoints + secret scanning (entropy-gated, redacted) | linkfinder, secretfinder, jsluice, trufflehog, gitleaks, custom regex |
-| 11 | `cloud_enum` | S3 / Azure / GCP bucket candidates | built-in (+ optional cloudbrute across 7 providers) |
-| 12 | `vulnscan` | vulnerability scanning + OOB confirmation | nuclei, nikto, wapiti, dalfox, xsstrike, sqlmap, ghauri, commix, tplmap, ssrfmap, crlfuzz, corsy, wpscan, joomscan + built-in OOB client |
-| 13 | `sensitive` | dorking & exposed-data checks | GitHub/Google dorking, shodan, s3scanner, hunter.io |
-| 14 | `screenshot` | visual recon | gowitness, aquatone, EyeWitness |
-| 15 | `prioritize` | de-dup, score, rank (P1–P4) + Exploit-DB enrichment | built-in + searchsploit |
-| 16 | `report` | HTML/Markdown/JSON/CSV/SARIF + notifications | built-in |
+```
+synchunt [targets] [options]
+```
 
-Each phase produces artifacts that the next phase consumes; artifact paths are resolved automatically even when only a subset of phases runs.
+### Targets & scope
+
+| Flag | Description |
+|---|---|
+| `-d, --domain DOMAIN` | Target domain / IP (comma-separated for several). |
+| `-l, --list FILE` | File with one target per line. |
+| `--scope-file FILE` | In-scope entries; everything else is refused before traffic is sent. |
+| `--out-of-scope-file FILE` | Explicit exclusions (wins over the scope file). |
+
+### Scanning
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | `quick` (5 phases) · `balanced` · `full` (all 16) · `deep` (slower, broader). |
+| `--phase LIST` | Exact phases to run, e.g. `--phase subdomain,validation,vulnscan`. |
+| `--full` | Shortcut for all 16 phases. |
+| `--resume` | Continue the latest run for this target from `scan_state.json`. |
+| `--dry-run` | Print the plan and exit — no packets sent. |
+| `--output-dir DIR` | Base output directory (default `output`). |
+| `--threads N` · `--timeout S` · `--rate-limit RPS` | Concurrency, per-tool timeout, shared HTTP rate limit. |
+
+### Requests & authentication
+
+| Flag | Description |
+|---|---|
+| `--cookie VALUE` | `Cookie:` header for authenticated scanning (config: `general.cookie`). |
+| `--header "Name: value"` | Extra header on every request and tool call (repeatable; config: `general.headers`). |
+| `--proxy URL` | Route traffic through Burp Suite / OWASP ZAP / mitmproxy (config: `general.proxy`, env: `SYNCHUNT_PROXY`). |
+| `--lang CODE` | CLI/report language: `de en es fr hi ja pt zh` (env: `SYNCHUNT_LANG`). |
+
+### Diagnostics
+
+| Flag | Description |
+|---|---|
+| `--doctor` | Dependency + configuration health check (prints the platform summary). |
+| `--check-deps` | Exit non-zero if a required tool class is missing. |
+| `--install-deps` | Print install commands for everything missing. |
+| `--list-phases` · `--list-languages` · `--version` | Introspection. |
+
+### Examples
+
+```bash
+# Authenticated engagement through Burp, focused phases, extra header
+synchunt -d app.example.com --cookie "session=abc123" \
+         --header "X-Engagement: 2026-Q1" --proxy http://127.0.0.1:8080 \
+         --phase subdomain,validation,content,jsanalysis,vulnscan,report
+
+# Re-scan and diff against the previous run
+synchunt -d example.com --profile balanced        # second run adds "Compared to the previous scan"
+
+# German report for a client
+synchunt -d example.com --profile balanced --lang de
+
+# Ranking with CISA KEV + EPSS, then HackerOne/Intigriti/Bugcrowd drafts in reports/
+synchunt -d example.com --phase prioritize,report
+```
+
+---
+
+## 🧭 Pipeline
+
+Phases are ordered, individually runnable and resumable. `--profile` decides which ones run.
+
+| # | Phase | What it does |
+|---|---|---|
+| 1 | `subdomain` | Passive/active subdomain discovery — subfinder, amass, crt.sh, theHarvester, Censys, permutations resolved by puredns. |
+| 2 | `validation` | Live-host detection (httpx, or a built-in prober) and DNS sanity checks. |
+| 3 | `enrichment` | DNS/TLS/header/CDN enrichment, technology hints, interesting-path probes. |
+| 4 | `takeover` | Subdomain-takeover detection (CNAME + provider fingerprints). |
+| 5 | `portscan` | naabu / nmap / masscan / rustscan service discovery (TCP-connect fallback without root). |
+| 6 | `fingerprint` | whatweb / wafw00f / webanalyze — technologies and WAF detection. |
+| 7 | `github_recon` | GitHub repositories, issues and leaked-secret scanning. |
+| 8 | `content` | Crawling and discovery — katana, hakrawler, waybackurls, gau, ffuf, gobuster, feroxbuster, wfuzz, arjun. |
+| 9 | `api_discovery` | OpenAPI/Swagger/GraphQL/actuator discovery and built-in route brute force. |
+| 10 | `jsanalysis` | JavaScript endpoint extraction and secret scanning. |
+| 11 | `cloud_enum` | S3 / Azure / GCP bucket enumeration, plus CloudBrute when installed. |
+| 12 | `vulnscan` | nuclei, nikto, dalfox, sqlmap, crlfuzz, corsy, wpscan, joomscan, commix, tplmap, ssrfmap, Wapiti, out-of-band confirmation. |
+| 13 | `sensitive` | GitHub dorks, Google dorks, optional Shodan / Hunter.io. |
+| 14 | `screenshot` | gowitness / aquatone / EyeWitness visual recon. |
+| 15 | `prioritize` | De-duplicate, score, KEV/EPSS-enrich, attach Exploit-DB entries, rank. |
+| 16 | `report` | HTML/Markdown reports, SARIF, JSON/CSV, database, submission drafts, notifications. |
+
+Every phase records a status and result count, so `scan_state.json` and the terminal summary always tell
+you what ran, what was skipped and why.
 
 ---
 
@@ -243,33 +231,30 @@ Each phase produces artifacts that the next phase consumes; artifact paths are r
 
 ```
 output/
-└── target.com/
-    └── 20261007_200120/
-        ├── subdomains/            # discovered subdomains + per-tool output
+└── example.com/
+    └── 20261008_101500/
+        ├── subdomains/            # discovered hosts + per-tool output
         ├── dns/                   # live hosts, resolved IPs, httpx details
-        ├── intel/                 # enrichment: hosts.json, interesting paths
+        ├── intel/                 # hosts.json, interesting paths
         ├── ports/                 # open ports and services
         ├── fingerprinting/        # technologies.json, whatweb/wafw00f output
         ├── github_recon/          # repos, issues, secrets
-        ├── content_discovery/     # urls/, params/, parameters, js_files.txt
+        ├── content_discovery/     # urls/, params/, parameters, js_files.txt, gf-pattern matches
         ├── api_intelligence/      # api_specs.json, graphql.json, endpoints.txt
-        ├── js_analysis/           # endpoints/, secrets/ (redacted)
+        ├── js_analysis/           # endpoints/, secrets/ (values redacted)
         ├── cloud_enum/            # buckets, public_buckets.txt
-        ├── vulnerabilities/       # nuclei/sqlmap/... findings.json
+        ├── vulnerabilities/       # nuclei/sqlmap/… findings.json
         ├── sensitive_info/        # dorks and exposed-data results
         ├── screenshots/           # visual captures
-        ├── findings_prioritized/  # findings.json/csv, prioritized.md, top_findings.txt
-        ├── reports/               # report.html, report.md, results.sarif,
-        │                          # history.json, findings.json/csv, scan_data.json
+        ├── findings_prioritized/  # findings.json/csv, prioritized.md, top_findings.txt, threat_intel.json
+        ├── reports/               # report.html, report.md, results.sarif, history.json,
+        │                          # findings.json/csv, scan_data.json, submission_*.{json,csv}
         ├── scan_state.json        # resume state
-        └── synchunt_results.db    # SQLite correlation DB
+        └── synchunt_results.db    # SQLite correlation database
 ```
 
-Query the database directly:
-
-```bash
-sqlite3 output/target.com/*/synchunt_results.db
-
+```sql
+-- query the correlation database directly
 SELECT severity, category, COUNT(*) FROM findings GROUP BY severity, category;
 SELECT title, url, score FROM findings ORDER BY score DESC LIMIT 20;
 SELECT phase, status, result_count FROM phases ORDER BY id;
@@ -277,123 +262,202 @@ SELECT phase, status, result_count FROM phases ORDER BY id;
 
 ---
 
-## 🕓 Re-scan diffing
+## ⚙️ Configuration
 
-Point SyncHunt at the same target twice and the second report tells you what changed:
-
-```text
-[20:18:08] 🎯 [ FOUND ] History vs 20261007_201758: 1 new, 1 fixed, 3 persisting
-```
-
-- `reports/history.json` — machine-readable `new` / `fixed` / `persisting` lists and counts
-- the HTML and Markdown reports gain a **"Since last scan"** section (new findings first, fixed ones collapsed)
-- `reports/findings.csv` gains a `history` column (`new` / `persisting`)
-- every finding is matched on category + title + location, so a changed response body is still the *same* finding, not a new one
-
-Disable with `reporting.track_history: false`.
-
-## 🤖 CI / automation
-
-```bash
-python3 main.py -d target.com --profile balanced --json-report summary.json
-python3 main.py -d target.com --profile balanced --quiet
-```
-
-- `--json-report` writes the run summary (`tool`, `version`, `exit_code`, per-target `findings`, `severity`, `categories`, `top_findings`, `artifacts`, `history`).
-- `reports/results.sarif` can be uploaded straight to GitHub code scanning:
-
-```yaml
-- run: python3 main.py -d example.com --profile balanced
-- uses: github/codeql-action/upload-sarif@v3
-  with:
-    sarif_file: output/example.com/**/reports/results.sarif
-```
-
-- Exit codes: `0` ok · `1` error · `2` usage · `3` no targets · `130` interrupted — fail your pipeline on anything `>= 2`.
-
-## 🔧 Configuration
-
-`config.yaml` is fully commented and drives everything:
+Everything lives in [`config.yaml`](config.yaml) — one section per phase. The defaults are safe: passive
+where possible, no notifications, nothing leaves your machine.
 
 ```yaml
 general:
-  profile: balanced
-  threads: 50
-  timeout: 30
-  rate_limit: 50
-  output_dir: output
+  profile: "balanced"        # quick | balanced | full | deep
+  threads: 50                # worker threads
+  rate_limit: 50             # shared HTTP requests/second
+  cookie: ""                 # authenticated scanning (--cookie)
+  headers: []                # extra headers (--header "Name: value")
+  proxy: ""                  # Burp/ZAP/mitmproxy (--proxy, SYNCHUNT_PROXY)
+  language: "en"             # de en es fr hi ja pt zh (--lang, SYNCHUNT_LANG)
 
-profiles:
-  quick:    { phases: [subdomain, validation, enrichment, report] }
-  balanced: { phases: [subdomain, validation, enrichment, portscan, fingerprint,
-                        content, api_discovery, jsanalysis, vulnscan, prioritize, report] }
-  # full / deep also include github_recon, cloud_enum, sensitive, screenshot
+subdomain_enum:
+  subfinder: { enabled: true }
+  crtsh:     { enabled: true }
+  puredns:   { enabled: true, resolvers: "wordlists/resolvers.txt" }
 
-scope:
-  include: ["*.example.com", "203.0.113.0/24"]
-  exclude: ["blog.example.com"]
-  strict: false
+vuln_scanning:
+  nuclei:  { enabled: true, severity: "critical,high,medium", templates: "" }
+  sqlmap:  { enabled: false, risk: 1, level: 1, batch: true }
+  oob:     { enabled: false, provider: webhook }   # webhook | interactsh | custom
 
-github_recon:
-  token: ""            # or export GITHUB_TOKEN / GH_TOKEN
+finding_prioritizer:
+  searchsploit: { enabled: true }                  # local Exploit-DB, no network
+  threat_intel: { enabled: true, cache_hours: 12 }  # CISA KEV + FIRST EPSS
+
+reporting:
+  submission_exports: true   # HackerOne / Intigriti / Bugcrowd drafts
+  sarif_export: true         # reports/results.sarif
+  track_history: true        # diff against the previous run
 
 notifications:
-  enabled: false       # Slack / Discord / Telegram webhooks
+  enabled: false             # Slack / Discord / Telegram, off by default
 ```
 
-- **Tool gates** — every tool has an `enabled` flag; disabled or missing tools are skipped without failing the phase.
-- **Scope** — merged from `config.yaml`, `--scope-file`/`--out-of-scope-file`; supports domains, `*.` wildcards, IPs, CIDRs and `host:port`.
-- **Secrets** — `github_recon.token`, `sensitive_info.shodan.api_key` etc. can be set in the file or via environment variables; detected secrets in reports are truncated/redacted.
+Environment variables: `SYNCHUNT_PROXY`, `SYNCHUNT_LANG`, `SYNCHUNT_ASCII=1` (force ASCII console
+output), plus API keys for optional integrations (`SHODAN_API_KEY`, `CENSYS_API_ID`/`CENSYS_API_SECRET`,
+`HUNTER_API_KEY`, `GITHUB_TOKEN`).
+
+---
+
+## 🌍 Languages
+
+CLI messages and generated reports are available in **English, Spanish, French, German, Portuguese,
+Hindi, Japanese and Chinese**. Pick the language with any of (highest priority first):
+
+```bash
+synchunt -d example.com --lang ja        # CLI flag
+# general.language: "ja"                 # config.yaml
+export SYNCHUNT_LANG=ja                  # environment
+export LANG=ja_JP.UTF-8                  # OS locale (fallback)
+synchunt --list-languages                # show what is available
+```
+
+- Reports (`report.html`, `report.md`) and terminal output are translated; **identifiers stay English**
+  — tool names, config keys, phase names, file names and JSON/CSV field names — so scripts and CI never
+  break.
+- Console output is UTF-8 with automatic ASCII degradation (`SYNCHUNT_ASCII=1` or a non-UTF-8 terminal)
+  so box-drawing and emoji never turn into mojibake.
+
+---
+
+## 🖥 Platform support
+
+| Platform | Status | Notes |
+|---|---|---|
+| **Linux** | Tested | Full support; process groups for clean tool shutdown. |
+| **macOS** | Tested | Full support; same POSIX process handling as Linux. |
+| **Windows** | Supported | Process-tree termination via `taskkill /F /T`, UTF-8 console reconfiguration, `scripts/check.py` instead of bash. |
+| **Docker** | Supported | Slim and batteries-included images; runs unprivileged. |
+| **CI** | Supported | GitHub Actions matrix on Python 3.9–3.12 plus container/action jobs. |
+
+Cross-platform guarantees: every text file is opened with an explicit UTF-8 encoding, child processes get
+`PYTHONIOENCODING=utf-8`, and there is no bash dependency in the Python code path. Run the verification
+sweep on any OS with:
+
+```bash
+python3 scripts/check.py          # pure-Python, cross-platform (also: ./scripts/check.sh on POSIX)
+```
+
+---
+
+## 🤖 Automation
+
+**GitHub Action** (this repository ships [`action.yml`](action.yml)):
+
+```yaml
+- uses: ziroai/synchunt@main
+  with:
+    target: example.com
+    profile: balanced
+    fail-on: high            # fail the job when high/critical findings exist
+    upload-sarif: "true"     # results.sarif → GitHub code scanning
+```
+
+**CLI in CI:**
+
+```bash
+synchunt -d example.com --profile balanced --quiet --json-report summary.json
+synchunt -d example.com --full --json-report summary.json --output-dir artifacts
+```
+
+- `--json-report PATH` — counts by severity, per-phase status, top findings.
+- `reports/results.sarif` — upload with `github/codeql-action/upload-sarif@v3`.
+- `--quiet` — machine-friendly output; exit codes: `0` success, `1` error/failed check.
+- `notifications.*` — push critical findings to Slack, Discord or Telegram.
+
+---
+
+## 🧰 Tool coverage
+
+SyncHunt cross-checks the standard bug-bounty tool chain and states exactly where each tool stands:
+
+| State | Meaning |
+|---|---|
+| **Integrated** | SyncHunt runs the external tool for you (phase + config key). Missing binary → skipped with a hint. |
+| **Built-in** | SyncHunt implements the check itself — zero external dependencies. |
+| **Hooked** | Interactive platform (Burp, ZAP, mitmproxy): route traffic through it with `--proxy`, or feed it SyncHunt artifacts. |
+| **Manual / companion** | Deliberately not automated (commercial licences, host-level capture, interactive exploitation) with the reason and handover path documented. |
+
+**Automated coverage: 63 of 78 tools (81%)** — full table in
+[docs/TOOL-COVERAGE.md](docs/TOOL-COVERAGE.md). Beyond the tool list SyncHunt adds authenticated
+scanning, KEV/EPSS threat-intel enrichment and submission drafts.
+
+Offline helpers ship as a second console script:
+
+```bash
+synchunt-tools dedupe urls.txt                 # anew
+synchunt-tools unfurl urls.txt --part domain   # unfurl
+synchunt-tools gf ssrf all_urls.txt            # gf + gf-patterns
+synchunt-tools meg-urls hosts.txt paths.txt    # meg URL matrix
+synchunt-tools postman collection.json         # Postman → request URLs
+synchunt-tools hash-id 5f4dcc3b5aa765d61d8327deb882cf99   # hash type + hashcat/john preflight
+```
+
+---
+
+## 📚 Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, data flow, i18n and platform layers, extension points. |
+| [docs/WORKFLOW.md](docs/WORKFLOW.md) | Phase-by-phase operator playbook, authenticated scanning, out-of-band confirmation, manual companions. |
+| [docs/TOOL-COVERAGE.md](docs/TOOL-COVERAGE.md) | Every tool, its state, its config key and its handover path. |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Installation, platform support, Docker, CI, proxy configuration, hardening. |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Beginner roadmap: a staged learning path from zero to bug bounties, mapped to the phases. |
+| [config.yaml](config.yaml) | Fully commented configuration. |
+| [CHANGELOG.md](CHANGELOG.md) | Release history and recent changes. |
 
 ---
 
 ## 🧪 Development
 
 ```bash
-pip install -r requirements-dev.txt
-./scripts/check.sh                         # everything below, in parallel
+python3 -m pip install -e ".[dev]"
 
-python3 -m pytest tests -q                 # 174 unit + integration tests
-python3 -m pyflakes core modules reports main.py tests
-python3 -m compileall -q core modules reports main.py
-
-python3 main.py --doctor                   # environment check
-python3 main.py -d example.com --dry-run   # no traffic
+python3 -m pytest tests -q          # full suite
+./scripts/check.sh                  # POSIX: compile + pyflakes + pytest + doctor + dry-run
+python3 scripts/check.py            # any OS: the same sweep, pure Python
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of the above on Python 3.9–3.12.
-
-### Documentation
-
-| Document | Contents |
-|---|---|
-| [`docs/WORKFLOW.md`](docs/WORKFLOW.md) | the end-to-end hunt workflow: scope → recon → discovery → scanning → triage → report |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | beginner roadmap: what to learn in what order, with labs and practice loops |
-| [`docs/TOOL-COVERAGE.md`](docs/TOOL-COVERAGE.md) | every tool in the standard bug-bounty stack and exactly what SyncHunt does with it |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | design, database schema, how to add a phase or a tool |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | local install, Docker, CI action, unattended scanning |
+- **Tests** cover every phase with fake runners, the reporting/export stack, packaging, the CLI surface,
+  i18n catalogues and the platform layer — no network and no real targets required.
+- **Style** — `pyflakes` clean, `compileall` clean, no `shell=True`, secrets never logged.
+- **Packaging** — `pyproject.toml` exposes the `synchunt` and `synchunt-tools` console scripts; CI
+  installs the package and smokes both entry points.
+- **Extending** — add a phase module under `modules/`, register it in `main.py` (`PHASES`) and document
+  the config block in `config.yaml`; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#9-adding-a-phase).
 
 ---
 
-## 🔐 Security & Legal
+## 🔐 Authorised testing only
 
-- **Authorised testing only.** Only scan systems you own or have explicit written permission to test (bug-bounty scope, engagement contract, your own infrastructure).
-- Unauthorised scanning can violate computer-misuse laws and the terms of service of the targets involved.
-- Keep rate limits sensible; SyncHunt defaults to polite rates and exposes `--rate-limit`.
-- Findings and reports may contain sensitive data — treat `output/` as confidential.
+SyncHunt is built for **authorised security testing** — bug-bounty programmes within scope, penetration
+tests with a signed statement of work, or your own infrastructure.
 
-See [LICENSE](LICENSE) for the full terms and disclaimer.
+- Stay inside the scope: use `--scope-file` / `--out-of-scope-file`; SyncHunt refuses out-of-scope
+  targets before sending traffic.
+- Respect rate limits and programme rules; `--rate-limit` and per-tool timeouts exist for that reason.
+- Credential cracking, host-level interception and interactive exploitation are deliberately **not**
+  automated — those steps are documented as manual handovers.
+- You are responsible for the traffic you send. Unauthorised scanning may be illegal in your
+  jurisdiction.
+
+Found a vulnerability in SyncHunt itself? Open a private security advisory rather than a public issue.
 
 ---
 
 ## 🤝 Contributing
 
-1. Fork the repository and create a feature branch.
-2. Add tests for new behaviour (see `tests/`).
-3. Run `pytest`, `pyflakes` and `compileall` before opening a PR.
-4. Never add `shell=True` command construction — use the argument-list helpers in `core/utils.py` and `core/runner.py`.
-
----
+Issues and pull requests are welcome — especially new phase integrations, extra language catalogues and
+platform fixes. Please run `./scripts/check.sh` (or `scripts/check.py`) before opening a PR, and describe
+how the change was verified.
 
 ## 📄 License
 
@@ -401,6 +465,6 @@ MIT — see [LICENSE](LICENSE).
 
 <div align="center">
 
-**Made for security researchers, by security researchers.**
+**SyncHunt** — recon, scan, triage, report. Authorised testing only.
 
 </div>

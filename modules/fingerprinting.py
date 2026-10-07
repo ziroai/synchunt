@@ -78,7 +78,7 @@ class Fingerprinter:
     def _parse_whatweb(self, json_file: str) -> None:
         if not os.path.exists(json_file):
             return
-        with open(json_file, "r", errors="ignore") as fh:
+        with open(json_file, "r", errors="ignore", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line.startswith("{"):

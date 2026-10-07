@@ -25,11 +25,14 @@ from colorama import Fore, Style
 
 from core import __version__, history as scan_history
 from core.config_manager import ConfigManager
+from core import i18n
 from core.context import ScanContext
 from core.database_manager import DatabaseManager, default_db_path
 from core.dependency_checker import DependencyChecker
+from core.i18n import t
 from core.logger import BugHuntLogger
 from core.auth import summary as auth_summary
+from core.platform_compat import platform_summary
 from core.proxy import apply_proxy_env, describe as describe_proxy
 from core.runner import ToolRunner
 from core.utils import (
@@ -178,6 +181,7 @@ class SyncHunt:
             or getattr(args, "install_deps", False) or getattr(args, "doctor", False)
         )
         self.config = ConfigManager(args.config, allow_missing=diagnostics)
+        self.language = i18n.configure(self.config, getattr(args, "lang", "") or "")
         self.base_output = args.output_dir or self.config.get("general.output_dir", "output")
         if not diagnostics:
             # read-only commands must not litter the filesystem
@@ -281,7 +285,7 @@ class SyncHunt:
                         f"{', '.join(unknown)} - ignored"
                     )
                 selected = [p for p in configured if p in PHASE_BY_NAME]
-                self.logger.info(f"Using profile '{profile}' ({len(selected)} phases)")
+                self.logger.info(t("cli.profile", profile=profile, count=len(selected)))
             else:
                 selected = list(PHASE_ORDER)
 
@@ -314,6 +318,13 @@ class SyncHunt:
     def _execute(self) -> int:
         self.logger.banner(__version__)
 
+        if self.args.list_languages:
+            print("\nSupported languages (--lang CODE / SYNCHUNT_LANG):\n")
+            for line in i18n.describe():
+                print(line)
+            print()
+            return 0
+
         if self.args.list_phases:
             self._print_phases()
             return 0
@@ -327,6 +338,7 @@ class SyncHunt:
             return 0 if result["ready"] else 1
 
         if self.args.doctor:
+            self.logger.info(f"Platform: {platform_summary()}")
             return self._doctor(checker)
 
         # Validate phase selection up-front so a typo fails before any traffic.
@@ -338,7 +350,7 @@ class SyncHunt:
             return 3
 
         self.logger.info(
-            f"Targets: {', '.join(targets)} | "
+            t("cli.targets", targets=", ".join(targets)) + " | "
             f"output: {os.path.abspath(self.base_output)}"
         )
 
@@ -438,14 +450,16 @@ class SyncHunt:
                 state = load_json(os.path.join(output_dir, STATE_FILE), {})
                 completed = set(state.get("completed_phases", []))
 
+        if self.language != i18n.DEFAULT_LANGUAGE:
+            self.logger.info(t("cli.language", language=i18n.language_name()))
         self.logger.phase_banner(
             f"TARGET: {target}",
             extra=f"{len(phases)} phases | scope: {scope.describe()}",
         )
-        self.logger.info(f"Output directory: {output_dir}")
+        self.logger.info(t("cli.output", path=output_dir))
         if self.proxy:
-            self.logger.info(f"Proxy: {describe_proxy(self.proxy)}")
-        self.logger.info(f"Authentication: {auth_summary(self.config)}")
+            self.logger.info(t("cli.proxy", proxy=describe_proxy(self.proxy)))
+        self.logger.info(t("cli.auth", state=auth_summary(self.config)))
         self.logger.info(f"Correlation DB:   {db_path}")
 
         if self.args.dry_run:
@@ -806,7 +820,7 @@ class SyncHunt:
 
     def _print_dry_run(self, ctx: ScanContext, phases: List[str]) -> None:
         checker = DependencyChecker(self.logger)
-        print(f"\n{Fore.CYAN}{Style.BRIGHT}DRY RUN{Style.RESET_ALL} - no traffic will be sent\n")
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}{t('cli.dry_run')}{Style.RESET_ALL}\n")
         print(f"  Target : {ctx.target}")
         print(f"  Output : {ctx.output_dir}")
         print(f"  Scope  : {ctx.scope.describe() if ctx.scope else 'n/a'}")
@@ -945,6 +959,11 @@ Examples:
     config_group.add_argument(
         "--cookie", help="Cookie header value for authenticated scanning",
     )
+    config_group.add_argument(
+        "--lang", metavar="CODE",
+        help=f"language for CLI/report text ({', '.join(sorted(i18n.TRANSLATIONS))}); "
+             "env: SYNCHUNT_LANG",
+    )
     config_group.add_argument("--config", default="config.yaml", help="config file path")
     config_group.add_argument("-v", "--verbose", action="store_true")
     config_group.add_argument("-q", "--quiet", action="store_true")
@@ -958,12 +977,17 @@ Examples:
     diag_group.add_argument("--doctor", action="store_true",
                             help="dependency + configuration health check")
     diag_group.add_argument("--list-phases", action="store_true", help="list phases and exit")
+    diag_group.add_argument(
+        "--list-languages", action="store_true",
+        help="list the supported output languages and exit",
+    )
     diag_group.add_argument("--version", action="version", version=f"SyncHunt {__version__}")
 
     args = parser.parse_args(argv)
 
     diagnostic = (
         args.check_deps or args.install_deps or args.doctor or args.list_phases
+        or args.list_languages
     )
     if not args.domain and not args.list and not diagnostic:
         parser.error("specify a target with -d/--domain or -l/--list (or use --doctor)")
@@ -1000,6 +1024,13 @@ def main() -> int:
 
     try:
         return app.run()
+    except BrokenPipeError:
+        # e.g. `synchunt --list-languages | head` - exit quietly like Unix tools do
+        try:
+            sys.stdout.close()
+        except Exception:  # pragma: no cover - defensive
+            pass
+        return 0
     except KeyboardInterrupt:
         print("\n\n⚠️  interrupted by user")
         return 130
@@ -1011,8 +1042,11 @@ def main() -> int:
     except Exception as exc:  # pragma: no cover - top-level guard
         import traceback
 
-        print(f"\n❌ fatal error: {exc}")
-        traceback.print_exc()
+        try:
+            print(f"\n❌ fatal error: {exc}")
+            traceback.print_exc()
+        except BrokenPipeError:
+            pass
         return 1
 
 

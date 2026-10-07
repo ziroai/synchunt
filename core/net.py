@@ -311,7 +311,7 @@ def _dns_read_name(data: bytes, offset: int, depth: int = 0) -> tuple:
 
 def _system_resolver() -> str:
     try:
-        with open("/etc/resolv.conf", "r", errors="ignore") as fh:
+        with open("/etc/resolv.conf", "r", errors="ignore", encoding="utf-8") as fh:
             for line in fh:
                 parts = line.split()
                 if len(parts) >= 2 and parts[0] == "nameserver":
