@@ -1,0 +1,57 @@
+# ============================================
+# BugHuntRecon - .gitignore
+# ============================================
+
+# Scan output (can be huge + contains sensitive findings)
+output/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Environment / secrets files
+.env
+*.env
+secrets.yaml
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temp / scratch
+*.tmp
+*.bak
+*.backup
+
+# Compiled
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Wordlists (too large for git, install separately)
+wordlists/*.txt
+
+# Keep the wordlists folder structure
+!wordlists/.gitkeep

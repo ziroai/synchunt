@@ -1,0 +1,265 @@
+# ============================================
+# BugHuntRecon - Master Configuration
+# ============================================
+
+general:
+  threads: 50
+  timeout: 30
+  rate_limit: 150  # requests per second
+  user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+  resolve_timeout: 5
+  retry: 3
+  verbose: true
+  resume: true
+  output_dir: "output"
+  scope_file: ""  # path to in-scope domains
+  out_of_scope_file: ""  # path to out-of-scope domains
+
+# --- Subdomain Enumeration ---
+subdomain_enum:
+  enabled: true
+  subfinder:
+    enabled: true
+    threads: 30
+    timeout: 30
+    sources: "all"  # or comma-separated sources
+    config: ""  # path to subfinder provider-config
+  amass:
+    enabled: true
+    timeout: 30  # minutes
+    passive: true
+    config: ""  # path to amass config
+  assetfinder:
+    enabled: true
+    subs_only: true
+  findomain:
+    enabled: true
+    threads: 30
+  crtsh:
+    enabled: true
+  sublist3r:
+    enabled: true
+    threads: 30
+
+# --- Subdomain Validation ---
+subdomain_validation:
+  enabled: true
+  httpx:
+    enabled: true
+    threads: 50
+    timeout: 10
+    follow_redirects: true
+    status_code: true
+    title: true
+    tech_detect: true
+    content_length: true
+    web_server: true
+  dnsx:
+    enabled: true
+    threads: 100
+    wordlist: ""
+    resp: true
+  massdns:
+    enabled: true
+    resolvers: "wordlists/resolvers.txt"
+    rate: 500
+
+# --- Port Scanning ---
+port_scanning:
+  enabled: true
+  naabu:
+    enabled: true
+    top_ports: 1000
+    rate: 5000
+    threads: 25
+    scan_type: "s"  # s=SYN, c=CONNECT
+  nmap:
+    enabled: true
+    scan_type: "-sV -sC"
+    top_ports: 100
+    timing: "T4"
+  masscan:
+    enabled: false
+    rate: 10000
+    ports: "1-65535"
+
+# --- Fingerprinting ---
+fingerprinting:
+  enabled: true
+  whatweb:
+    enabled: true
+    aggression: 3  # 1-4
+  wafw00f:
+    enabled: true
+  webanalyze:
+    enabled: true
+
+# --- Content Discovery ---
+content_discovery:
+  enabled: true
+  waybackurls:
+    enabled: true
+  gau:
+    enabled: true
+    threads: 5
+    providers: "wayback,commoncrawl,otx,urlscan"
+  katana:
+    enabled: true
+    depth: 3
+    threads: 20
+    js_crawl: true
+  gospider:
+    enabled: true
+    depth: 3
+    threads: 10
+  hakrawler:
+    enabled: true
+    depth: 3
+  paramspider:
+    enabled: true
+  dirsearch:
+    enabled: true
+    wordlist: "wordlists/common.txt"
+    threads: 30
+    extensions: "php,asp,aspx,jsp,html,js,json,xml,txt,bak,old,conf,config,env,yml,yaml,toml,sql,db,log"
+  feroxbuster:
+    enabled: true
+    wordlist: "wordlists/raft-medium-directories.txt"
+    threads: 50
+    depth: 2
+
+# --- JS Analysis ---
+js_analysis:
+  enabled: true
+  linkfinder:
+    enabled: true
+  secretfinder:
+    enabled: true
+  custom_regex:
+    enabled: true
+    patterns:
+      - name: "AWS Key"
+        regex: "AKIA[0-9A-Z]{16}"
+      - name: "Google API Key"
+        regex: "AIza[0-9A-Za-z\\-_]{35}"
+      - name: "Slack Token"
+        regex: "xox[baprs]-[0-9a-zA-Z]{10,48}"
+      - name: "Private Key"
+        regex: "-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----"
+      - name: "Authorization Bearer"
+        regex: "[Bb]earer\\s+[a-zA-Z0-9_\\-\\.=]+"
+      - name: "JWT Token"
+        regex: "eyJ[A-Za-z0-9-_=]+\\.eyJ[A-Za-z0-9-_=]+\\.[A-Za-z0-9-_.+/=]*"
+      - name: "Generic API Key"
+        regex: "[Aa]pi[_-]?[Kk]ey[\\s:=\"']+[A-Za-z0-9_\\-]{20,}"
+      - name: "Generic Secret"
+        regex: "[Ss]ecret[\\s:=\"']+[A-Za-z0-9_\\-]{20,}"
+      - name: "Mailgun API Key"
+        regex: "key-[0-9a-zA-Z]{32}"
+      - name: "Stripe API Key"
+        regex: "sk_live_[0-9a-zA-Z]{24}"
+      - name: "Firebase URL"
+        regex: "https://[a-z0-9-]+\\.firebaseio\\.com"
+      - name: "S3 Bucket"
+        regex: "[a-zA-Z0-9.-]+\\.s3\\.amazonaws\\.com"
+      - name: "Heroku API Key"
+        regex: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+
+# --- Vulnerability Scanning ---
+vuln_scanning:
+  enabled: true
+  nuclei:
+    enabled: true
+    templates: ""  # blank = use all
+    severity: "critical,high,medium,low,info"
+    rate_limit: 150
+    bulk_size: 25
+    concurrency: 25
+    headless: false
+    new_templates: true
+    automatic_scan: true
+  nikto:
+    enabled: true
+    tuning: "1234567890"
+  dalfox:
+    enabled: true
+    threads: 10
+    blind_xss: ""  # your blind XSS callback URL
+  sqlmap:
+    enabled: false  # dangerous, enable manually
+    level: 1
+    risk: 1
+    batch: true
+  crlfuzz:
+    enabled: true
+    concurrency: 25
+  corsy:
+    enabled: true
+    threads: 20
+
+# --- Sensitive Info ---
+sensitive_info:
+  enabled: true
+  s3scanner:
+    enabled: true
+  github_dorking:
+    enabled: true
+    token: ""  # GitHub personal access token
+    dorks:
+      - "password"
+      - "secret"
+      - "api_key"
+      - "apikey"
+      - "access_token"
+      - "auth_token"
+      - "credentials"
+      - "db_password"
+      - "ftp"
+      - "ssh"
+  shodan:
+    enabled: false
+    api_key: ""
+  google_dorking:
+    enabled: true
+    dorks:
+      - 'site:{target} ext:sql | ext:db | ext:log | ext:bak'
+      - 'site:{target} ext:xml | ext:conf | ext:cnf | ext:cfg'
+      - 'site:{target} ext:env | ext:ini | ext:yml'
+      - 'site:{target} inurl:admin | inurl:login | inurl:dashboard'
+      - 'site:{target} intitle:"index of"'
+      - 'site:{target} inurl:api | inurl:v1 | inurl:v2'
+      - 'site:{target} ext:php intitle:"phpinfo()"'
+      - 'site:{target} inurl:wp-content | inurl:wp-includes'
+
+# --- Screenshots ---
+screenshots:
+  enabled: true
+  gowitness:
+    enabled: true
+    threads: 10
+    timeout: 10
+    resolution: "1440,900"
+  aquatone:
+    enabled: true
+    threads: 5
+    timeout: 15000
+
+# --- Reporting ---
+reporting:
+  html_report: true
+  markdown_report: true
+  json_export: true
+
+# --- Notifications ---
+notifications:
+  enabled: false
+  slack:
+    enabled: false
+    webhook_url: ""
+  discord:
+    enabled: false
+    webhook_url: ""
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""

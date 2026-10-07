@@ -1,0 +1,5 @@
+# placeholder - add your wordlists here
+# Recommended wordlists:
+# - SecLists: https://github.com/danielmiessler/SecLists
+# - raft-medium-directories.txt (for feroxbuster/dirsearch)
+# - resolvers.txt (for massdns)
