@@ -138,7 +138,10 @@ def output_dir(tmp_path):
 @pytest.fixture
 def config_path(tmp_path, output_dir):
     path = tmp_path / "config.yaml"
-    path.write_text(MINIMAL_CONFIG.format(output_dir=output_dir))
+    # YAML double-quoted scalars interpret backslash escapes, so Windows paths
+    # must be written with forward slashes (Path handles both everywhere).
+    safe_output_dir = str(output_dir).replace("\\", "/")
+    path.write_text(MINIMAL_CONFIG.format(output_dir=safe_output_dir))
     return str(path)
 
 

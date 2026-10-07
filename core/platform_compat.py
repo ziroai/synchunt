@@ -204,7 +204,7 @@ def kill_process_tree(process: subprocess.Popen, grace: float = 1.5) -> None:
     """
     import time
 
-    if process.poll() is not None:
+    if process is None or process.poll() is not None:
         return
     if IS_WINDOWS:
         try:
@@ -213,21 +213,42 @@ def kill_process_tree(process: subprocess.Popen, grace: float = 1.5) -> None:
                 capture_output=True, check=False,
             )
             return
-        except Exception:  # pragma: no cover - fall through to kill()
+        except Exception:  # pragma: no cover - fall through to terminate()
             pass
     else:
         try:
-            os.killpg(os.getpgid(process.pid), signal_SIGTERM())
-            time.sleep(grace)
-            if process.poll() is None:
-                os.killpg(os.getpgid(process.pid), signal_SIGKILL())
-            return
-        except Exception:  # pragma: no cover - fall through to kill()
-            pass
+            pgid = os.getpgid(process.pid)
+        except Exception:  # pragma: no cover - already gone
+            pgid = None
+        # Only signal a process group this child actually owns. Signalling a
+        # group we merely belong to would take down the framework itself.
+        if pgid is not None and pgid == process.pid:
+            try:
+                os.killpg(pgid, signal_SIGTERM())
+            except Exception:  # pragma: no cover - race with exit
+                pass
+            else:
+                deadline = time.time() + max(0.0, grace)
+                while time.time() < deadline and process.poll() is None:
+                    time.sleep(0.05)
+                if process.poll() is None:
+                    try:
+                        os.killpg(pgid, signal_SIGKILL())
+                    except Exception:  # pragma: no cover
+                        pass
+                return
     try:
-        process.kill()
-    except Exception:
+        process.terminate()
+    except Exception:  # pragma: no cover - already gone
         pass
+    deadline = time.time() + max(0.0, grace)
+    while time.time() < deadline and process.poll() is None:
+        time.sleep(0.05)
+    if process.poll() is None:
+        try:
+            process.kill()
+        except Exception:  # pragma: no cover
+            pass
 
 
 def signal_SIGTERM():

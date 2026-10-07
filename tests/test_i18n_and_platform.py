@@ -191,3 +191,38 @@ def test_log_file_is_utf8_and_not_duplicated(tmp_path):
         data = handle.read()
     assert "héllo ✅".encode("utf-8") in data
     assert data.decode("utf-8").count("[FOUND]") == 1
+
+
+def test_test_config_template_survives_windows_paths(tmp_path):
+    """Regression: a Windows output_dir must not break the YAML config."""
+    import yaml
+
+    from tests import conftest
+
+    rendered = conftest.MINIMAL_CONFIG.format(
+        output_dir=str(tmp_path / "out").replace("\\", "/")
+    )
+    assert yaml.safe_load(rendered)["general"]["output_dir"].endswith("out")
+
+
+def test_kill_process_tree_never_signals_our_own_group():
+    """Regression: killing a plain child must not take down the caller."""
+    from core.platform_compat import kill_process_tree
+
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    kill_process_tree(process, grace=0.2)
+    assert process.poll() is not None
+
+
+def test_kill_process_tree_handles_owned_group():
+    """A tool started with spawn_kwargs() owns a group and is killed with it."""
+    from core.platform_compat import kill_process_tree, spawn_kwargs
+
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], **spawn_kwargs()
+    )
+    kill_process_tree(process, grace=0.2)
+    assert process.poll() is not None
