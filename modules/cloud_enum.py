@@ -90,7 +90,7 @@ class CloudEnumerator:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("CLOUD ENUMERATION", 10)
+        self.logger.phase_banner("CLOUD ENUMERATION", 11)
         started = time.time()
 
         if not any(self.providers.values()):

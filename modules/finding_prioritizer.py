@@ -265,7 +265,7 @@ class FindingPrioritizer:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("FINDING PRIORITISATION", 14)
+        self.logger.phase_banner("FINDING PRIORITISATION", 15)
         started = time.time()
 
         collected = self._collect()

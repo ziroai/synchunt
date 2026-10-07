@@ -50,7 +50,7 @@ class VulnScanner:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("VULNERABILITY SCANNING", 11)
+        self.logger.phase_banner("VULNERABILITY SCANNING", 12)
         started = time.time()
 
         if not read_file_lines(self.live_hosts_file):
@@ -69,6 +69,14 @@ class VulnScanner:
             self.run_crlfuzz()
         if self.config.is_tool_enabled("vuln_scanning", "corsy"):
             self.run_corsy()
+        if self.config.is_tool_enabled("vuln_scanning", "wapiti"):
+            self.run_wapiti()
+        if self.config.is_tool_enabled("vuln_scanning", "ghauri"):
+            self.run_ghauri()
+        if self.config.is_tool_enabled("vuln_scanning", "xsstrike"):
+            self.run_xsstrike()
+        if self.config.is_tool_enabled("vuln_scanning", "wpscan"):
+            self.run_wpscan()
 
         self._check_open_redirects()
         self._write_outputs()
@@ -262,6 +270,229 @@ class VulnScanner:
                 )
                 self.logger.vuln(f"SQL injection candidate: {url}")
 
+    # ------------------------------------------------------------------
+    def run_wapiti(self) -> None:
+        """wapiti: broad web-application scan with JSON output."""
+        wapiti_dir = os.path.join(self.output_dir, "wapiti")
+        os.makedirs(wapiti_dir, exist_ok=True)
+        report_file = os.path.join(wapiti_dir, "wapiti.json")
+        if self.runner.require("wapiti", report_file):
+            return
+
+        cfg = self.config.get_tool_config("vuln_scanning", "wapiti")
+        self.logger.info("Running wapiti...")
+        for host in read_file_lines(self.live_hosts_file)[: int(cfg.get("max_hosts", 5))]:
+            safe = host.replace("https://", "").replace("http://", "")
+            safe = safe.replace("/", "_").replace(":", "_")
+            host_report = os.path.join(wapiti_dir, f"{safe}.json")
+            cmd = [
+                "wapiti", "-u", host, "-f", "json", "-o", host_report,
+                "--flush-session", "-q",
+                "--scope", "page",
+            ]
+            if cfg.get("modules"):
+                cmd += ["-m", str(cfg["modules"])]
+            self.runner.run(cmd, tool_name=f"wapiti-{safe[:30]}", timeout=3600)
+
+        for name in sorted(os.listdir(wapiti_dir)):
+            if not name.endswith(".json"):
+                continue
+            data = load_json(os.path.join(wapiti_dir, name), {})
+            if not isinstance(data, dict):
+                continue
+            for category, entries in (data.get("vulnerabilities") or {}).items():
+                if not isinstance(entries, list):
+                    continue
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    level = entry.get("level")
+                    severity = {4: "critical", 3: "high", 2: "medium",
+                                1: "low"}.get(int(level) if str(level).isdigit() else 0, "low")
+                    path = str(entry.get("path") or "")
+                    parameter = str(entry.get("parameter") or "")
+                    self.findings.append(
+                        Finding(
+                            category=str(category).lower().replace(" ", "-"),
+                            title=f"wapiti: {category}"
+                                  + (f" ({parameter})" if parameter else ""),
+                            severity=severity,
+                            target=self.ctx.target,
+                            url=path,
+                            evidence=truncate(
+                                str(entry.get("info") or entry.get("curl_command") or ""), 600
+                            ),
+                            source="wapiti",
+                            confidence="medium",
+                            tags=["wapiti", str(category).lower()],
+                        )
+                    )
+            self.logger.info(f"wapiti: parsed {name}")
+
+    def run_ghauri(self) -> None:
+        """ghauri: SQL injection scanner (sqlmap alternative)."""
+        ghauri_dir = os.path.join(self.output_dir, "sqli")
+        os.makedirs(ghauri_dir, exist_ok=True)
+        if self.runner.require("ghauri"):
+            return
+        if not self.params_file or not os.path.exists(self.params_file):
+            self.logger.skip("no parameterised URLs available for ghauri")
+            return
+
+        cfg = self.config.get_tool_config("vuln_scanning", "ghauri")
+        self.logger.info("Running ghauri on parameterised URLs...")
+        for url in read_file_lines(self.params_file)[: int(cfg.get("max_urls", 10))]:
+            safe = url.replace("https://", "").replace("http://", "")[:60]
+            safe = safe.replace("/", "_").replace("?", "_").replace("&", "_")
+            cmd = [
+                "ghauri", "-u", url,
+                "--level", str(cfg.get("level", 1)),
+                "--risk", str(cfg.get("risk", 1)),
+                "--batch", "--threads", "5",
+                "--output-dir", os.path.join(ghauri_dir, safe),
+            ]
+            result = self.runner.run(cmd, tool_name="ghauri", timeout=600)
+            combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+            lowered = combined.lower()
+            if "injectable" in lowered or "is vulnerable" in lowered or "sql injection" in lowered:
+                self.findings.append(
+                    Finding(
+                        category="sqli",
+                        title="SQL injection (ghauri)",
+                        severity="critical",
+                        target=self.ctx.target,
+                        url=url,
+                        evidence=truncate(combined, 600),
+                        source="ghauri",
+                        confidence="medium",
+                        tags=["sqli", "injection"],
+                    )
+                )
+                self.logger.vuln(f"SQL injection candidate (ghauri): {url}")
+
+    def run_xsstrike(self) -> None:
+        """xsstrike: XSS scanner over parameterised URLs."""
+        if self.runner.require("xsstrike"):
+            return
+        scan_file = self.params_file if os.path.exists(self.params_file or "") else ""
+        if not scan_file:
+            self.logger.skip("no parameterised URLs available for xsstrike")
+            return
+
+        cfg = self.config.get_tool_config("vuln_scanning", "xsstrike")
+        xss_dir = os.path.join(self.output_dir, "xss")
+        os.makedirs(xss_dir, exist_ok=True)
+        self.logger.info("Running xsstrike...")
+        for url in read_file_lines(scan_file)[: int(cfg.get("max_urls", 5))]:
+            result = self.runner.run(
+                ["xsstrike", "-u", url, "--skip", "--skip-dom"],
+                tool_name="xsstrike", timeout=600,
+            )
+            combined = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+            if "payload" in combined.lower() and "vulnerable" in combined.lower():
+                self.findings.append(
+                    Finding(
+                        category="xss",
+                        title="Reflected XSS (xsstrike)",
+                        severity="medium",
+                        target=self.ctx.target,
+                        url=url,
+                        evidence=truncate(combined, 600),
+                        source="xsstrike",
+                        confidence="medium",
+                        tags=["xss", "injection"],
+                    )
+                )
+                self.logger.vuln(f"XSS candidate (xsstrike): {url}")
+
+    def run_wpscan(self) -> None:
+        """wpscan: WordPress-specific checks (needs an API token for vuln data)."""
+        wp_dir = os.path.join(self.output_dir, "wpscan")
+        os.makedirs(wp_dir, exist_ok=True)
+        if self.runner.require("wpscan"):
+            return
+
+        hosts = read_file_lines(self.live_hosts_file)
+        # Only bother with hosts that look like WordPress.
+        wp_hosts = [
+            host for host in hosts
+            if any(marker in host.lower() for marker in ("wp", "wordpress", "blog"))
+        ][:5] or hosts[: int(self.config.get_tool_config("vuln_scanning", "wpscan")
+                             .get("max_hosts", 2))]
+        cfg = self.config.get_tool_config("vuln_scanning", "wpscan")
+        self.logger.info(f"Running wpscan on {len(wp_hosts)} host(s)...")
+        for host in wp_hosts:
+            safe = host.replace("https://", "").replace("http://", "")
+            safe = safe.replace("/", "_").replace(":", "_")
+            report_file = os.path.join(wp_dir, f"{safe}.json")
+            cmd = [
+                "wpscan", "--url", host, "--format", "json",
+                "--output", report_file, "--no-banner",
+                "--random-user-agent", "--disable-tls-checks",
+                "--plugins-detection", "passive",
+            ]
+            if cfg.get("api_token"):
+                cmd += ["--api-token", str(cfg["api_token"])]
+            self.runner.run(cmd, tool_name=f"wpscan-{safe[:30]}", timeout=1800)
+
+        for name in sorted(os.listdir(wp_dir)):
+            if not name.endswith(".json"):
+                continue
+            data = load_json(os.path.join(wp_dir, name), {})
+            if not isinstance(data, dict):
+                continue
+            target_url = str((data.get("target_url") or "").rstrip("/"))
+            version = (data.get("version") or {})
+            if isinstance(version, dict) and version.get("number"):
+                self.findings.append(
+                    Finding(
+                        category="cms",
+                        title=f"WordPress {version.get('number')} detected",
+                        severity="info",
+                        target=self.ctx.target,
+                        url=target_url,
+                        evidence=f"WordPress version {version.get('number')}",
+                        source="wpscan",
+                        confidence="high",
+                        tags=["wordpress", "cms"],
+                    )
+                )
+            for vuln in data.get("vulnerabilities") or []:
+                if not isinstance(vuln, dict):
+                    continue
+                self.findings.append(
+                    Finding(
+                        category="cms",
+                        title=f"WordPress core vulnerability: {vuln.get('title') or 'unknown'}",
+                        severity=_severity_from_cvss(vuln.get("cvss")),
+                        target=self.ctx.target,
+                        url=target_url,
+                        evidence=truncate(str(vuln.get("title") or ""), 400),
+                        source="wpscan",
+                        confidence="medium",
+                        tags=["wordpress", "core", "cve"],
+                    )
+                )
+            for plugin_name, plugin in (data.get("plugins") or {}).items():
+                if not isinstance(plugin, dict):
+                    continue
+                for vuln in plugin.get("vulnerabilities") or []:
+                    if not isinstance(vuln, dict):
+                        continue
+                    self.findings.append(
+                        Finding(
+                            category="cms",
+                            title=f"WordPress plugin vulnerability: {plugin_name}",
+                            severity=_severity_from_cvss(vuln.get("cvss")),
+                            target=self.ctx.target,
+                            url=f"{target_url}/wp-content/plugins/{plugin_name}/",
+                            evidence=truncate(str(vuln.get("title") or ""), 400),
+                            source="wpscan",
+                            confidence="medium",
+                            tags=["wordpress", "plugin", "cve"],
+                        )
+                    )
+
     def run_crlfuzz(self) -> None:
         crlf_dir = os.path.join(self.output_dir, "crlf")
         os.makedirs(crlf_dir, exist_ok=True)
@@ -415,6 +646,25 @@ def _severity_from_line(line: str) -> str:
         if f"[{level}]" in lowered:
             return level
     return "medium"
+
+
+def _severity_from_cvss(score) -> str:
+    """Map a CVSS score (0-10, possibly a dict/None) to a severity band."""
+    if isinstance(score, dict):
+        score = score.get("score")
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return "high"  # plugin vulns without a score are still worth reporting
+    if value >= 9.0:
+        return "critical"
+    if value >= 7.0:
+        return "high"
+    if value >= 4.0:
+        return "medium"
+    if value > 0:
+        return "low"
+    return "info"
 
 
 def _count_severities(findings: List[Finding]) -> Dict[str, int]:

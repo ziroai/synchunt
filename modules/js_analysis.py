@@ -15,7 +15,9 @@ from typing import Dict, List
 from core.models import Asset, Finding
 from core.secrets import build_patterns, scan_text
 from core.utils import (
+    load_json,
     read_file_lines,
+    read_json_lines,
     save_json,
     write_file_lines,
 )
@@ -48,7 +50,7 @@ class JSAnalyzer:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("JAVASCRIPT ANALYSIS", 9)
+        self.logger.phase_banner("JAVASCRIPT ANALYSIS", 10)
         started = time.time()
 
         js_urls = read_file_lines(self.js_files_list)
@@ -67,6 +69,12 @@ class JSAnalyzer:
             self.run_linkfinder(scoped[:100])
         if self.config.is_tool_enabled("js_analysis", "secretfinder"):
             self.run_secretfinder(scoped[:100])
+        if self.config.is_tool_enabled("js_analysis", "jsluice"):
+            self.run_jsluice()
+        if self.config.is_tool_enabled("js_analysis", "trufflehog"):
+            self.run_trufflehog()
+        if self.config.is_tool_enabled("js_analysis", "gitleaks"):
+            self.run_gitleaks()
 
         self.run_custom_regex_scan()
 
@@ -174,6 +182,126 @@ class JSAnalyzer:
         write_file_lines(endpoints_file, sorted(found))
         self.endpoints.update(found)
         self.logger.found(f"LinkFinder: {len(found)} endpoint(s)")
+
+    # ------------------------------------------------------------------
+    def run_jsluice(self) -> None:
+        """jsluice: extract URLs from the downloaded JS corpus (JSON lines)."""
+        if self.runner.require("jsluice"):
+            return
+        raw_dir = os.path.join(self.output_dir, "endpoints")
+        os.makedirs(raw_dir, exist_ok=True)
+        output_file = os.path.join(raw_dir, "jsluice.jsonl")
+
+        self.logger.info("Running jsluice endpoint extraction...")
+        with open(output_file, "w") as fh:
+            for name in sorted(os.listdir(self.files_dir)):
+                path = os.path.join(self.files_dir, name)
+                if not os.path.isfile(path):
+                    continue
+                result = self.runner.run(
+                    ["jsluice", "urls", path], tool_name="jsluice", timeout=300
+                )
+                for line in (result.get("stdout") or "").splitlines():
+                    if line.strip().startswith("{"):
+                        fh.write(line + "\n")
+
+        for record in read_json_lines(output_file):
+            url = record.get("url") if isinstance(record, dict) else None
+            if url:
+                self.endpoints.add(str(url))
+
+    def run_trufflehog(self) -> None:
+        """trufflehog: verified-secret scan of the downloaded JS corpus."""
+        if self.runner.require("trufflehog"):
+            return
+        raw_dir = os.path.join(self.output_dir, "secrets")
+        os.makedirs(raw_dir, exist_ok=True)
+        output_file = os.path.join(raw_dir, "trufflehog.jsonl")
+
+        self.logger.info("Running trufflehog on the JS corpus...")
+        result = self.runner.run(
+            ["trufflehog", "filesystem", self.files_dir, "--json",
+             "--no-verification", "--log-level", "-1"],
+            tool_name="trufflehog", timeout=900,
+        )
+        with open(output_file, "w") as fh:
+            for line in (result.get("stdout") or "").splitlines():
+                if line.strip().startswith("{"):
+                    fh.write(line + "\n")
+
+        for record in read_json_lines(output_file):
+            if not isinstance(record, dict):
+                continue
+            detector = record.get("DetectorName") or record.get("detector_name") or "secret"
+            raw = str(record.get("Raw") or record.get("raw") or "")
+            location = ""
+            metadata = record.get("SourceMetadata") or {}
+            data = (metadata.get("Data") or {}) if isinstance(metadata, dict) else {}
+            filesystem = (data.get("Filesystem") or {}) if isinstance(data, dict) else {}
+            location = str(filesystem.get("file") or "")
+            self._record_tool_secret(
+                tool="trufflehog", name=str(detector), raw=raw, location=location,
+                verified=bool(record.get("Verified")),
+            )
+
+    def run_gitleaks(self) -> None:
+        """gitleaks: secret scan of the downloaded JS corpus."""
+        if self.runner.require("gitleaks"):
+            return
+        raw_dir = os.path.join(self.output_dir, "secrets")
+        os.makedirs(raw_dir, exist_ok=True)
+        output_file = os.path.join(raw_dir, "gitleaks.json")
+
+        self.logger.info("Running gitleaks on the JS corpus...")
+        self.runner.run(
+            ["gitleaks", "detect", "--source", self.files_dir, "--no-banner",
+             "--redact", "--report-format", "json", "--report-path", output_file],
+            tool_name="gitleaks", timeout=600,
+        )
+        data = load_json(output_file, [])
+        for record in data if isinstance(data, list) else []:
+            if not isinstance(record, dict):
+                continue
+            self._record_tool_secret(
+                tool="gitleaks",
+                name=str(record.get("RuleID") or "secret"),
+                raw=str(record.get("Secret") or ""),
+                location=str(record.get("File") or ""),
+                verified=False,
+            )
+
+    def _record_tool_secret(self, tool: str, name: str, raw: str, location: str,
+                            verified: bool) -> None:
+        """Store a tool-reported secret - always redacted before it is written."""
+        from core.secrets import redact
+
+        redacted = redact(raw) if raw else "(redacted)"
+        entry = {
+            "type": name,
+            "severity": "high" if verified else "medium",
+            "confidence": "high" if verified else "medium",
+            "location": location,
+            "value": redacted,
+            "source": tool,
+            "verified": verified,
+            "entropy": 0.0,
+        }
+        self.secrets.append(entry)
+        self.findings.append(
+            Finding(
+                category="secrets",
+                title=f"Secret in JavaScript ({tool}): {name}",
+                severity=entry["severity"],
+                target=self.ctx.target,
+                url=location or self.ctx.target,
+                evidence=f"{tool} [{name}] {redacted}"
+                         + (" (verified)" if verified else ""),
+                source=tool,
+                confidence=entry["confidence"],
+                tags=["secrets", "javascript", tool],
+            )
+        )
+        self.logger.vuln(f"Secret [{name}] via {tool} in {location}: {redacted}")
 
     def run_secretfinder(self, js_urls: List[str]) -> None:
         if self.runner.require("secretfinder"):

@@ -19,7 +19,9 @@
 
 ## ✨ Highlights
 
-- **15-phase pipeline, one command** — `--profile quick|balanced|full|deep` or pick phases with `--phase a,b,c`.
+- **16-phase pipeline, one command** — `--profile quick|balanced|full|deep` or pick phases with `--phase a,b,c`.
+- **Subdomain-takeover detection built in** — CNAME chains matched against 20 takeover-prone services
+  (fingerprints and claimability rules from can-i-take-over-xyz), no binaries required.
 - **Scope enforced before active tooling** — wildcard domains, IPs/CIDRs and `host:port` entries; in-scope/out-of-scope files; nothing leaves your scope.
 - **SQLite correlation store** — every scan writes `synchunt_results.db` (scans, phases, assets, findings) with fingerprint-based de-duplication.
 - **Heuristic prioritisation, not just severity** — findings are scored (impact, confidence, exposure, CVSS-style bonuses) and ranked P1–P4 with reasons you can read.
@@ -110,7 +112,7 @@ python3 main.py -d example.com [options]
 | `-l, --list` | file with one target per line |
 | `--profile` | `quick` \| `balanced` \| `full` \| `deep` (default from config) |
 | `--phase` | comma-separated phases, e.g. `subdomain,validation,report` |
-| `--full` | run all 15 phases |
+| `--full` | run all 16 phases |
 | `--resume` | continue the latest run for this target (completed phases are skipped) |
 | `--dry-run` | print the plan and exit |
 | `--output-dir` | base output directory (default `output/`) |
@@ -147,10 +149,10 @@ python3 main.py -d target.com --profile balanced --json-report summary.json
 
 | Profile | Phases | Notes |
 |---|---|---|
-| `quick` | 5 | subdomain → validation → enrichment → prioritize → report |
-| `balanced` | 11 | quick + portscan, fingerprint, content, api, js, vulnscan |
-| `full` | 14 | balanced + github_recon, cloud_enum, sensitive |
-| `deep` | 15 | everything including screenshots |
+| `quick` | 5 | subdomain → validation → enrichment → takeover → report |
+| `balanced` | 12 | quick + portscan, fingerprint, content, api, js, vulnscan |
+| `full` | 15 | balanced + github_recon, cloud_enum, sensitive |
+| `deep` | 16 | everything including screenshots |
 
 `prioritize` and `report` are always appended automatically (reporting needs prioritised findings), so the numbers above already include them.
 
@@ -160,21 +162,22 @@ python3 main.py -d target.com --profile balanced --json-report summary.json
 
 | # | Phase | What it does | Tools (optional) |
 |---|---|---|---|
-| 1 | `subdomain` | subdomain discovery | subfinder, amass, assetfinder, findomain, sublist3r, puredns, gotator + built-in crt.sh |
+| 1 | `subdomain` | subdomain discovery | subfinder, amass, assetfinder, findomain, chaos, sublist3r, puredns, gotator + built-in crt.sh, SecurityTrails, Shodan DNS |
 | 2 | `validation` | live host detection | httpx, dnsx + built-in prober fallback |
 | 3 | `enrichment` | DNS/TLS/header/CDN intel, exposure checks | built-in (uses the shared HTTP layer) |
-| 4 | `portscan` | port & service discovery | naabu, nmap, masscan |
-| 5 | `fingerprint` | tech-stack & WAF detection | whatweb, wafw00f, webanalyze + header heuristics |
-| 6 | `github_recon` | repositories, issues, leaked secrets | GitHub API (set `github_recon.token`) |
-| 7 | `content` | crawling, URLs, params, directories | katana, gospider, hakrawler, waybackurls, gau, paramspider, dirsearch, feroxbuster, ffuf, x8 |
-| 8 | `api_discovery` | OpenAPI/Swagger, GraphQL, actuator probes | built-in |
-| 9 | `jsanalysis` | JS endpoints + secret scanning (entropy-gated, redacted) | linkfinder, secretfinder, custom regex |
-| 10 | `cloud_enum` | S3 / Azure / GCP bucket candidates | built-in |
-| 11 | `vulnscan` | vulnerability scanning | nuclei, nikto, dalfox, sqlmap, crlfuzz, corsy |
-| 12 | `sensitive` | dorking & exposed-data checks | GitHub/Google dorking, shodan, s3scanner |
-| 13 | `screenshot` | visual recon | gowitness, aquatone |
-| 14 | `prioritize` | de-dup, score, rank (P1–P4) | built-in |
-| 15 | `report` | HTML/Markdown/JSON/CSV + notifications | built-in |
+| 4 | `takeover` | subdomain takeover: CNAME chains + unclaimed-service fingerprints | built-in + optional subjack |
+| 5 | `portscan` | port & service discovery | naabu, nmap, masscan, rustscan |
+| 6 | `fingerprint` | tech-stack & WAF detection | whatweb, wafw00f, webanalyze + header heuristics |
+| 7 | `github_recon` | repositories, issues, leaked secrets | GitHub API (set `github_recon.token`) |
+| 8 | `content` | crawling, URLs, params, directories | katana, gospider, hakrawler, waybackurls, gau, waymore, paramspider, arjun, x8, dirsearch, feroxbuster, ffuf, gobuster |
+| 9 | `api_discovery` | OpenAPI/Swagger, GraphQL, actuator probes | built-in |
+| 10 | `jsanalysis` | JS endpoints + secret scanning (entropy-gated, redacted) | linkfinder, secretfinder, jsluice, trufflehog, gitleaks, custom regex |
+| 11 | `cloud_enum` | S3 / Azure / GCP bucket candidates | built-in |
+| 12 | `vulnscan` | vulnerability scanning | nuclei, nikto, wapiti, dalfox, xsstrike, sqlmap, ghauri, crlfuzz, corsy, wpscan |
+| 13 | `sensitive` | dorking & exposed-data checks | GitHub/Google dorking, shodan, s3scanner |
+| 14 | `screenshot` | visual recon | gowitness, aquatone |
+| 15 | `prioritize` | de-dup, score, rank (P1–P4) | built-in |
+| 16 | `report` | HTML/Markdown/JSON/CSV/SARIF + notifications | built-in |
 
 Each phase produces artifacts that the next phase consumes; artifact paths are resolved automatically even when only a subset of phases runs.
 
@@ -293,7 +296,7 @@ notifications:
 ```bash
 pip install -r requirements-dev.txt
 
-python3 -m pytest tests -q                 # 96 unit + integration tests
+python3 -m pytest tests -q                 # 121 unit + integration tests
 python3 -m pyflakes core modules reports main.py tests
 python3 -m compileall -q core modules reports main.py
 
@@ -303,7 +306,14 @@ python3 main.py -d example.com --dry-run   # no traffic
 
 CI (`.github/workflows/ci.yml`) runs all of the above on Python 3.9–3.12.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design, the database schema and how to add a phase or a tool.
+### Documentation
+
+| Document | Contents |
+|---|---|
+| [`docs/WORKFLOW.md`](docs/WORKFLOW.md) | the end-to-end hunt workflow: scope → recon → discovery → scanning → triage → report |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | beginner roadmap: what to learn in what order, with labs and practice loops |
+| [`docs/TOOL-COVERAGE.md`](docs/TOOL-COVERAGE.md) | every tool in the standard bug-bounty stack and exactly what SyncHunt does with it |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | design, database schema, how to add a phase or a tool |
 
 ---
 

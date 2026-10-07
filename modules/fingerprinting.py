@@ -33,7 +33,7 @@ class Fingerprinter:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("WEB FINGERPRINTING", 5)
+        self.logger.phase_banner("WEB FINGERPRINTING", 6)
         started = time.time()
 
         hosts = read_file_lines(self.live_hosts_file)

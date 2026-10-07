@@ -269,6 +269,120 @@ def reverse_dns(ip: str, timeout: float = 5) -> Optional[str]:
         socket.setdefaulttimeout(previous)
 
 
+# ----------------------------------------------------------------------
+# CNAME lookups
+# ----------------------------------------------------------------------
+# Subdomain-takeover detection needs CNAME records, which the stdlib socket
+# API does not expose. A tiny UDP query keeps the framework dependency-free;
+# if it fails (no resolver, blocked UDP, odd network) the caller simply gets
+# an empty answer and the check is reported as skipped.
+def _dns_read_name(data: bytes, offset: int, depth: int = 0) -> tuple:
+    """Decode a (possibly compressed) DNS name; returns (name, next_offset)."""
+    if depth > 10:
+        raise ValueError("DNS compression loop")
+    labels = []
+    while True:
+        if offset >= len(data):
+            raise ValueError("truncated DNS name")
+        length = data[offset]
+        if length == 0:
+            offset += 1
+            break
+        if length & 0xC0 == 0xC0:  # compression pointer
+            if offset + 1 >= len(data):
+                raise ValueError("truncated DNS pointer")
+            pointer = ((length & 0x3F) << 8) | data[offset + 1]
+            pointed, _ = _dns_read_name(data, pointer, depth + 1)
+            if pointed:
+                labels.append(pointed)
+            return ".".join(labels), offset + 2
+        offset += 1
+        labels.append(data[offset:offset + length].decode("ascii", "ignore"))
+        offset += length
+    return ".".join(labels), offset
+
+
+def _system_resolver() -> str:
+    try:
+        with open("/etc/resolv.conf", "r", errors="ignore") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 2 and parts[0] == "nameserver":
+                    return parts[1]
+    except OSError:
+        pass
+    return "1.1.1.1"
+
+
+def resolve_cname(host: str, timeout: float = 4.0, resolver: str = "") -> str:
+    """
+    Return the first CNAME target for `host` ("" when there is none).
+
+    Never raises: DNS problems are reported as an empty answer.
+    """
+    host = (host or "").strip().rstrip(".").lower()
+    if not host:
+        return ""
+
+    import random
+    import socket
+    import struct
+
+    query_id = random.randint(0, 0xFFFF)
+    header = struct.pack(">HHHHHH", query_id, 0x0100, 1, 0, 0, 0)
+    question = b"".join(
+        bytes([len(label)]) + label.encode("ascii", "ignore")
+        for label in host.split(".") if label
+    ) + b"\x00"
+    packet = header + question + struct.pack(">HH", 5, 1)  # type CNAME, class IN
+
+    server = resolver or _system_resolver()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            sock.sendto(packet, (server, 53))
+            data, _ = sock.recvfrom(4096)
+    except OSError:
+        return ""
+
+    try:
+        if len(data) < 12:
+            return ""
+        response_id, _flags, qdcount, ancount = struct.unpack(">HHHH", data[:8])
+        if response_id != query_id or ancount == 0:
+            return ""
+        offset = 12
+        for _ in range(qdcount):
+            _, offset = _dns_read_name(data, offset)
+            offset += 4  # qtype + qclass
+        for _ in range(ancount):
+            _, offset = _dns_read_name(data, offset)
+            if offset + 10 > len(data):
+                return ""
+            rtype, _rclass, _ttl, rdlength = struct.unpack(">HHIH", data[offset:offset + 10])
+            offset += 10
+            if rtype == 5 and rdlength:  # CNAME
+                name, _ = _dns_read_name(data, offset)
+                return name.rstrip(".").lower()
+            offset += rdlength
+    except (ValueError, struct.error):
+        return ""
+    return ""
+
+
+def resolve_cname_chain(host: str, depth: int = 6, timeout: float = 4.0) -> List[str]:
+    """Follow CNAMEs: returns the chain of targets (excluding `host`)."""
+    chain: List[str] = []
+    current = (host or "").strip().lower()
+    for _ in range(depth):
+        target = resolve_cname(current, timeout=timeout)
+        if not target or target in chain:
+            break
+        chain.append(target)
+        current = target
+    return chain
+
+
 def tls_peer_info(host: str, port: int = 443, timeout: float = 6) -> Dict:
     """
     Fetch the TLS certificate presented by a host.

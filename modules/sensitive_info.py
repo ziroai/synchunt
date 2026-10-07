@@ -48,7 +48,7 @@ class SensitiveInfoScanner:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("SENSITIVE INFORMATION", 12)
+        self.logger.phase_banner("SENSITIVE INFORMATION", 13)
         started = time.time()
 
         if self.config.is_tool_enabled("sensitive_info", "github_dorking", True):

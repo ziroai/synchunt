@@ -124,7 +124,7 @@ class GitHubRecon:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("GITHUB RECON", 6)
+        self.logger.phase_banner("GITHUB RECON", 7)
         started = time.time()
 
         if not self.config.get_bool("github_recon.enabled", True):

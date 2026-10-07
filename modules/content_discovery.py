@@ -57,7 +57,7 @@ class ContentDiscovery:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("CONTENT DISCOVERY", 7)
+        self.logger.phase_banner("CONTENT DISCOVERY", 8)
         started = time.time()
 
         hosts = read_file_lines(self.live_hosts_file)
@@ -75,6 +75,7 @@ class ContentDiscovery:
             ("katana", self.run_katana),
             ("gospider", self.run_gospider),
             ("hakrawler", self.run_hakrawler),
+            ("waymore", self.run_waymore),
         ):
             if not self.config.is_tool_enabled("content_discovery", tool_name):
                 continue
@@ -86,10 +87,14 @@ class ContentDiscovery:
         if self.config.is_tool_enabled("content_discovery", "paramspider"):
             self.run_paramspider()
 
+        if self.config.is_tool_enabled("content_discovery", "arjun"):
+            self.run_arjun()
+
         for tool_name, method in (
             ("dirsearch", self.run_dirsearch),
             ("feroxbuster", self.run_feroxbuster),
             ("ffuf", self.run_ffuf),
+            ("gobuster", self.run_gobuster),
             ("x8", self.run_x8),
         ):
             if not self.config.is_tool_enabled("content_discovery", tool_name):
@@ -334,6 +339,107 @@ class ContentDiscovery:
         if urls:
             self.logger.found(f"{tool}: {len(urls)} URL(s)")
         return urls
+
+    # ------------------------------------------------------------------
+    def run_waymore(self, seed: str) -> List[str]:
+        """waymore: historical URLs from many archive sources at once."""
+        output_file = os.path.join(self.urls_dir, "waymore.txt")
+        if self.runner.require("waymore", output_file):
+            return []
+
+        cfg = self.config.get_tool_config("content_discovery", "waymore")
+        self.logger.info("Running waymore...")
+        cmd = [
+            "waymore", "-i", self.target,
+            "-mode", str(cfg.get("mode", "U")),
+            "-oU", output_file,
+            "-t", str(cfg.get("threads", 3)),
+        ]
+        self.runner.run(cmd, tool_name="waymore", timeout=1200)
+        return [url for url in read_file_lines(output_file) if url.startswith("http")]
+
+    def run_gobuster(self) -> None:
+        if self.runner.require("gobuster"):
+            return
+        cfg = self.config.get_tool_config("content_discovery", "gobuster")
+        wordlist = cfg.get("wordlist", "wordlists/directories.txt")
+        raw_dir = os.path.join(self.dirs_dir, "gobuster")
+        os.makedirs(raw_dir, exist_ok=True)
+        if not os.path.exists(wordlist):
+            self.logger.skip(f"gobuster wordlist missing ({wordlist})")
+            return
+
+        self.logger.info("Running gobuster...")
+        host_by_file = {}
+        for host in read_file_lines(self.live_hosts_file)[:10]:
+            safe = host.replace("https://", "").replace("http://", "")
+            safe = safe.replace("/", "_").replace(":", "_")
+            output_file = os.path.join(raw_dir, f"{safe}.txt")
+            host_by_file[output_file] = host.rstrip("/")
+            cmd = [
+                "gobuster", "dir", "-u", host, "-w", wordlist,
+                "-t", str(cfg.get("threads", 40)), "-q", "--no-progress",
+                "-k", "-o", output_file,
+            ]
+            if cfg.get("extensions"):
+                cmd += ["-x", str(cfg["extensions"])]
+            self.runner.run(cmd, tool_name=f"gobuster-{safe[:30]}", timeout=900)
+
+        for name in sorted(os.listdir(raw_dir)):
+            if not name.endswith(".txt"):
+                continue
+            path = os.path.join(raw_dir, name)
+            base = host_by_file.get(path, "")
+            for line in read_file_lines(path):
+                candidate = line.split()[0] if line.split() else ""
+                if candidate.startswith("http"):
+                    self.all_urls.add(candidate)
+                elif candidate.startswith("/") and base:
+                    # newer gobuster builds print relative paths
+                    self.all_urls.add(base + candidate)
+
+    def run_arjun(self) -> None:
+        """arjun: hidden HTTP parameter discovery on live hosts."""
+        if self.runner.require("arjun"):
+            return
+        cfg = self.config.get_tool_config("content_discovery", "arjun")
+        raw_dir = os.path.join(self.params_dir, "arjun")
+        os.makedirs(raw_dir, exist_ok=True)
+
+        self.logger.info("Running arjun parameter discovery...")
+        for host in read_file_lines(self.live_hosts_file)[:10]:
+            safe = host.replace("https://", "").replace("http://", "")
+            safe = safe.replace("/", "_").replace(":", "_")
+            output_file = os.path.join(raw_dir, f"{safe}.json")
+            cmd = [
+                "arjun", "-u", host, "-oJ", output_file,
+                "-t", str(cfg.get("threads", 10)), "-q",
+            ]
+            self.runner.run(cmd, tool_name=f"arjun-{safe[:30]}", timeout=900)
+
+        for name in sorted(os.listdir(raw_dir)):
+            if not name.endswith(".json"):
+                continue
+            data = load_json(os.path.join(raw_dir, name), {})
+            if not isinstance(data, dict):
+                continue
+            for url, params in data.items():
+                if not str(url).startswith("http"):
+                    continue
+                if isinstance(params, list) and params:
+                    query = "&".join(
+                        f"{p}=FUZZ" for p in params if isinstance(p, str)
+                    )
+                    separator = "&" if "?" in url else "?"
+                    self.all_urls.add(f"{url}{separator}{query}")
+                elif isinstance(params, dict):
+                    # verbose arjun output: {url: {param: value}}
+                    query = "&".join(
+                        f"{p}=FUZZ" for p in params.keys()
+                    )
+                    separator = "&" if "?" in url else "?"
+                    if query:
+                        self.all_urls.add(f"{url}{separator}{query}")
 
     def _ingest_directory_findings(self, raw_dir: str, suffix: str) -> None:
         for name in sorted(os.listdir(raw_dir)):

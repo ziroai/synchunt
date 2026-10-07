@@ -52,6 +52,9 @@ class SubdomainEnumerator:
             ("assetfinder", self.run_assetfinder),
             ("findomain", self.run_findomain),
             ("crtsh", self.run_crtsh),
+            ("chaos", self.run_chaos),
+            ("securitytrails", self.run_securitytrails),
+            ("shodan", self.run_shodan_dns),
             ("sublist3r", self.run_sublist3r),
             ("puredns", self.run_puredns),
             ("gotator", self.run_gotator),
@@ -176,6 +179,82 @@ class SubdomainEnumerator:
                     found.add(name)
         write_file_lines(output_file, sorted(found))
         self.logger.info(f"crt.sh returned {len(found)} unique name(s)")
+        return self._collect(output_file)
+
+    def run_chaos(self) -> List[str]:
+        """ProjectDiscovery chaos dataset (needs a CHAOS_KEY)."""
+        output_file = self._output("chaos.txt")
+        if self.runner.require("chaos", output_file):
+            return []
+        self.logger.info("Querying chaos...")
+        cmd = ["chaos", "-d", self.target, "-silent", "-o", output_file]
+        env_key = os.environ.get("CHAOS_KEY") or self.config.get(
+            "subdomain_enum.chaos.api_key", ""
+        )
+        if env_key:
+            cmd += ["-key", str(env_key)]
+        self.runner.run(cmd, tool_name="chaos", timeout=600)
+        return self._collect(output_file)
+
+    def run_securitytrails(self) -> List[str]:
+        """SecurityTrails API (needs a key: config or SECURITYTRAILS_API_KEY)."""
+        output_file = self._output("securitytrails.txt")
+        api_key = (
+            os.environ.get("SECURITYTRAILS_API_KEY")
+            or self.config.get("subdomain_enum.securitytrails.api_key", "")
+        )
+        if not api_key:
+            self.logger.debug("securitytrails skipped (no API key)")
+            return []
+        from core.net import http_request
+
+        url = f"https://api.securitytrails.com/v1/domain/{self.target}/subdomains"
+        result = http_request(
+            self.ctx.session, "GET", url, limiter=self.ctx.limiter, timeout=30,
+            headers={"APIKEY": str(api_key)},
+        )
+        if not result.ok:
+            self.logger.warning(f"securitytrails returned {result.status}")
+            return []
+        payload = result.json(default={}) or {}
+        found = {
+            f"{name}.{self.target}".lower()
+            for name in payload.get("subdomains", []) or []
+            if name
+        }
+        if not found:
+            return []
+        write_file_lines(output_file, sorted(found))
+        return self._collect(output_file)
+
+    def run_shodan_dns(self) -> List[str]:
+        """Shodan DNS domain API (needs a key: config or SHODAN_API_KEY)."""
+        output_file = self._output("shodan_dns.txt")
+        api_key = (
+            os.environ.get("SHODAN_API_KEY")
+            or self.config.get("sensitive_info.shodan.api_key", "")
+        )
+        if not api_key:
+            self.logger.debug("shodan DNS skipped (no API key)")
+            return []
+        from core.net import http_request
+
+        url = f"https://api.shodan.io/dns/domain/{self.target}?key={api_key}"
+        result = http_request(
+            self.ctx.session, "GET", url, limiter=self.ctx.limiter, timeout=30
+        )
+        if not result.ok:
+            self.logger.warning(f"shodan DNS returned {result.status}")
+            return []
+        payload = result.json(default={}) or {}
+        found = set()
+        for record in payload.get("data", []) or []:
+            sub = record.get("subdomain")
+            if sub:
+                found.add(f"{sub}.{self.target}".lower())
+        if not found:
+            return []
+        write_file_lines(output_file, sorted(found))
         return self._collect(output_file)
 
     def run_sublist3r(self) -> List[str]:

@@ -80,7 +80,7 @@ class PortScanner:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("PORT SCANNING", 4)
+        self.logger.phase_banner("PORT SCANNING", 5)
         started = time.time()
 
         if not read_file_lines(self.targets_file):
@@ -97,6 +97,8 @@ class PortScanner:
             self.run_nmap(clean_file)
         if self.config.is_tool_enabled("port_scanning", "masscan"):
             self.run_masscan(clean_file)
+        if self.config.is_tool_enabled("port_scanning", "rustscan"):
+            self.run_rustscan(clean_file)
 
         self._merge_outputs()
         self._service_findings()
@@ -216,6 +218,42 @@ class PortScanner:
                             self.open_ports.setdefault(host, [])
                             if port not in self.open_ports[host]:
                                 self.open_ports[host].append(port)
+
+    def run_rustscan(self, targets_file: str) -> List[str]:
+        """rustscan with greppable output ("host -> [80,443]")."""
+        output_file = os.path.join(self.output_dir, "rustscan.txt")
+        if self.runner.require("rustscan", output_file):
+            return []
+
+        cfg = self.config.get_tool_config("port_scanning", "rustscan")
+        hosts = read_file_lines(targets_file)[: int(cfg.get("max_hosts", 20))]
+        if not hosts:
+            return []
+        self.logger.info("Running rustscan...")
+        cmd = [
+            "rustscan", "-a", ",".join(hosts), "--greppable", "--no-config",
+            "--ulimit", str(cfg.get("ulimit", 5000)),
+            "-t", str(cfg.get("threads", 1500)),
+        ]
+        if cfg.get("ports"):
+            cmd += ["-p", str(cfg["ports"])]
+        if cfg.get("range"):
+            cmd += ["-r", str(cfg["range"])]
+        self.runner.run(cmd, tool_name="rustscan", timeout=1800)
+
+        ports: List[str] = []
+        for line in read_file_lines(output_file):
+            if "->" not in line:
+                continue
+            host, _, found = line.partition("->")
+            host = host.strip()
+            for port in found.strip().strip("[]").split(","):
+                port = port.strip()
+                if port.isdigit():
+                    ports.append(f"{host}:{port}")
+        write_file_lines(os.path.join(self.output_dir, "rustscan_ports.txt"), ports)
+        self.logger.info(f"rustscan: {len(ports)} open port(s)")
+        return ports
 
     def run_masscan(self, targets_file: str) -> None:
         cfg = self.config.get_tool_config("port_scanning", "masscan")

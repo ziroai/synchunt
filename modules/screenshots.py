@@ -28,7 +28,7 @@ class ScreenshotCapture:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("VISUAL RECON", 13)
+        self.logger.phase_banner("VISUAL RECON", 14)
         started = time.time()
 
         hosts = read_file_lines(self.live_hosts_file)

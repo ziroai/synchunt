@@ -26,12 +26,14 @@ profiles:
       - subdomain
       - validation
       - enrichment
+      - takeover
       - report
   balanced:
     phases:
       - subdomain
       - validation
       - enrichment
+      - takeover
       - portscan
       - fingerprint
       - content
@@ -45,6 +47,7 @@ profiles:
       - subdomain
       - validation
       - enrichment
+      - takeover
       - portscan
       - fingerprint
       - github_recon
@@ -61,6 +64,7 @@ profiles:
       - subdomain
       - validation
       - enrichment
+      - takeover
       - portscan
       - fingerprint
       - github_recon
@@ -117,6 +121,15 @@ subdomain_enum:
     permutations: "wordlists/permutations.txt"
     depth: 1
 
+  chaos:
+    enabled: true
+    api_key: ""                 # or export CHAOS_KEY
+  securitytrails:
+    enabled: true
+    api_key: ""                 # or export SECURITYTRAILS_API_KEY
+  shodan:
+    enabled: true               # Shodan DNS domain API (passive DNS)
+    api_key: ""                 # or export SHODAN_API_KEY
 # ------------------------------------------------------------------
 # Phase 2 - Validation
 # ------------------------------------------------------------------
@@ -156,7 +169,19 @@ asset_enrichment:
     - "/debug"
 
 # ------------------------------------------------------------------
-# Phase 4 - Port scanning
+# Phase 4 - Subdomain takeover
+# ------------------------------------------------------------------
+subdomain_takeover:
+  enabled: true
+  max_hosts: 300                   # cap on hosts checked per run
+  subjack:
+    enabled: true                  # optional cross-check (needs a fingerprints file)
+    threads: 50
+    timeout: 30
+    fingerprints: ""               # e.g. wordlists/subjack_fingerprints.json
+
+# ------------------------------------------------------------------
+# Phase 5 - Port scanning
 # ------------------------------------------------------------------
 port_scanning:
   enabled: true
@@ -177,6 +202,12 @@ port_scanning:
     rate: 10000
     ports: "1-65535"
 
+  rustscan:
+    enabled: true
+    threads: 1500
+    ulimit: 5000
+    max_hosts: 20
+    range: ""                   # e.g. "1-65535" (empty = rustscan default)
 # ------------------------------------------------------------------
 # Phase 5 - Fingerprinting
 # ------------------------------------------------------------------
@@ -191,7 +222,7 @@ fingerprinting:
     enabled: true
 
 # ------------------------------------------------------------------
-# Phase 6 - GitHub reconnaissance
+# Phase 7 - GitHub reconnaissance
 # ------------------------------------------------------------------
 github_recon:
   enabled: true
@@ -214,7 +245,7 @@ github_recon:
     - "BEGIN RSA PRIVATE KEY"
 
 # ------------------------------------------------------------------
-# Phase 7 - Content discovery
+# Phase 8 - Content discovery
 # ------------------------------------------------------------------
 content_discovery:
   enabled: true
@@ -258,8 +289,20 @@ content_discovery:
     wordlist: "wordlists/parameters.txt"
     threads: 20
 
+  waymore:
+    enabled: true
+    mode: "U"                   # U = URLs only
+    threads: 3
+  gobuster:
+    enabled: true
+    threads: 40
+    wordlist: "wordlists/directories.txt"
+    extensions: "php,html,js,json,txt"
+  arjun:
+    enabled: true
+    threads: 10
 # ------------------------------------------------------------------
-# Phase 8 - API discovery
+# Phase 9 - API discovery
 # ------------------------------------------------------------------
 api_introspection:
   enabled: true
@@ -269,7 +312,7 @@ api_introspection:
   report_health: false           # /health,/metrics,/status are recorded as assets only
 
 # ------------------------------------------------------------------
-# Phase 9 - JavaScript analysis
+# Phase 10 - JavaScript analysis
 # ------------------------------------------------------------------
 js_analysis:
   enabled: true
@@ -300,6 +343,12 @@ js_analysis:
         confidence: "low"
         entropy: false
 
+  jsluice:
+    enabled: true               # URL extraction from the downloaded JS corpus
+  trufflehog:
+    enabled: true               # verified secret scanning of the JS corpus
+  gitleaks:
+    enabled: true               # regex secret scanning of the JS corpus
 # ------------------------------------------------------------------
 # Phase 10 - Cloud storage enumeration
 # ------------------------------------------------------------------
@@ -311,7 +360,7 @@ cloud_enum:
   max_candidates: 120
 
 # ------------------------------------------------------------------
-# Phase 11 - Vulnerability scanning
+# Phase 12 - Vulnerability scanning
 # ------------------------------------------------------------------
 vuln_scanning:
   enabled: true
@@ -343,8 +392,24 @@ vuln_scanning:
     enabled: true
     threads: 20
 
+  wapiti:
+    enabled: true
+    max_hosts: 5
+    modules: ""                 # e.g. "xss,sql,exec" (empty = wapiti default)
+  ghauri:
+    enabled: true
+    level: 1
+    risk: 1
+    max_urls: 10
+  xsstrike:
+    enabled: true
+    max_urls: 5
+  wpscan:
+    enabled: true
+    max_hosts: 2
+    api_token: ""               # or export WPSCAN_API_TOKEN
 # ------------------------------------------------------------------
-# Phase 12 - Sensitive information / OSINT
+# Phase 13 - Sensitive information / OSINT
 # ------------------------------------------------------------------
 sensitive_info:
   enabled: true
@@ -378,7 +443,7 @@ sensitive_info:
     enabled: false               # cloud_enum covers buckets without extra tooling
 
 # ------------------------------------------------------------------
-# Phase 13 - Screenshots
+# Phase 14 - Screenshots
 # ------------------------------------------------------------------
 screenshots:
   enabled: true

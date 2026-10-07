@@ -4,7 +4,7 @@ This document explains how the framework is put together, where state lives, and
 
 ## 1. Design goals
 
-1. **One pipeline, one entry point.** `main.py` orchestrates 15 phases; each phase is a self-contained module in `modules/`.
+1. **One pipeline, one entry point.** `main.py` orchestrates 16 phases; each phase is a self-contained module in `modules/`.
 2. **Graceful degradation.** External tools are optional. If a tool is missing or disabled it is skipped with a hint, and where practical the phase has a built-in fallback (crt.sh, HTTP prober, header fingerprinting, OpenAPI/GraphQL probes, cloud enumeration).
 3. **Safety by construction.** No `shell=True` in the scanning path, rate-limited HTTP, scope filtering enforced before active work, secrets redacted in reports.
 4. **Everything correlates.** Every phase reports into a per-run SQLite database (`scans`, `phases`, `assets`, `findings`) with fingerprint-based de-duplication; reports and exports are generated from that database.
@@ -15,7 +15,8 @@ This document explains how the framework is put together, where state lives, and
 ```
 main.py                      CLI + orchestrator (phase registry, resume, reports)
 │
-├── modules/                 one module per phase (subdomain_enum, vuln_scanning, …)
+├── modules/                 one module per phase (subdomain_enum, subdomain_takeover,
+│                            vuln_scanning, …)
 │
 ├── core/
 │   ├── context.py           ScanContext: target, paths, config, logger, DB, scope

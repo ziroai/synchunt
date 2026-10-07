@@ -56,6 +56,7 @@ from modules.screenshots import ScreenshotCapture
 from modules.scope_manager import ScopeManager
 from modules.sensitive_info import SensitiveInfoScanner
 from modules.subdomain_enum import SubdomainEnumerator
+from modules.subdomain_takeover import SubdomainTakeover
 from modules.subdomain_validation import SubdomainValidator
 from modules.vuln_scanning import VulnScanner
 from reports.data_export import DataExporter
@@ -94,38 +95,41 @@ PHASES: List[Phase] = [
     Phase("enrichment", "asset_enrichment", 3, lambda ctx: AssetEnricher(ctx),
           requires=[], produces=["intel_hosts", "interesting_paths"],
           description="DNS/TLS/header/CDN enrichment and exposure checks"),
-    Phase("portscan", "port_scanning", 4, lambda ctx: PortScanner(ctx),
+    Phase("takeover", "subdomain_takeover", 4, lambda ctx: SubdomainTakeover(ctx),
+          requires=["subdomains"], produces=["takeover_candidates"],
+          description="subdomain takeover (CNAME + service fingerprints)"),
+    Phase("portscan", "port_scanning", 5, lambda ctx: PortScanner(ctx),
           requires=["live_hosts"], produces=["ports"],
           description="naabu/nmap/masscan port and service discovery"),
-    Phase("fingerprint", "fingerprinting", 5, lambda ctx: Fingerprinter(ctx),
+    Phase("fingerprint", "fingerprinting", 6, lambda ctx: Fingerprinter(ctx),
           requires=["live_hosts"], produces=["fingerprint"],
           description="whatweb/wafw00f/webanalyze tech and WAF detection"),
-    Phase("github_recon", "github_recon", 6, lambda ctx: GitHubRecon(ctx),
+    Phase("github_recon", "github_recon", 7, lambda ctx: GitHubRecon(ctx),
           produces=["github_repos"],
           description="GitHub repositories, issues and leaked secrets"),
-    Phase("content", "content_discovery", 7, lambda ctx: ContentDiscovery(ctx),
+    Phase("content", "content_discovery", 8, lambda ctx: ContentDiscovery(ctx),
           requires=["live_hosts"], produces=["urls", "js_files", "params"],
           description="URL crawling, parameter and directory discovery"),
-    Phase("api_discovery", "api_introspection", 8, lambda ctx: APIIntrospector(ctx),
+    Phase("api_discovery", "api_introspection", 9, lambda ctx: APIIntrospector(ctx),
           produces=["api_specs", "api_endpoints"],
           description="OpenAPI/Swagger/GraphQL/actuator discovery"),
-    Phase("jsanalysis", "js_analysis", 9, lambda ctx: JSAnalyzer(ctx),
+    Phase("jsanalysis", "js_analysis", 10, lambda ctx: JSAnalyzer(ctx),
           requires=["js_files"], produces=["js_endpoints"],
           description="JS endpoint extraction and secret scanning"),
-    Phase("cloud_enum", "cloud_enum", 10, lambda ctx: CloudEnumerator(ctx),
+    Phase("cloud_enum", "cloud_enum", 11, lambda ctx: CloudEnumerator(ctx),
           produces=["cloud_public_buckets"],
           description="S3/Azure/GCP bucket enumeration"),
-    Phase("vulnscan", "vuln_scanning", 11, lambda ctx: VulnScanner(ctx),
+    Phase("vulnscan", "vuln_scanning", 12, lambda ctx: VulnScanner(ctx),
           requires=["live_hosts"], produces=["vulnerabilities"],
           description="nuclei/nikto/dalfox/sqlmap/crlfuzz/corsy scanning"),
-    Phase("sensitive", "sensitive_info", 12, lambda ctx: SensitiveInfoScanner(ctx),
+    Phase("sensitive", "sensitive_info", 13, lambda ctx: SensitiveInfoScanner(ctx),
           description="GitHub dorks, Google dorks, optional Shodan"),
-    Phase("screenshot", "screenshots", 13, lambda ctx: ScreenshotCapture(ctx),
+    Phase("screenshot", "screenshots", 14, lambda ctx: ScreenshotCapture(ctx),
           requires=["live_hosts"], description="gowitness/aquatone visual recon"),
-    Phase("prioritize", "finding_prioritizer", 14, lambda ctx: FindingPrioritizer(ctx),
+    Phase("prioritize", "finding_prioritizer", 15, lambda ctx: FindingPrioritizer(ctx),
           produces=["findings_json", "findings_csv", "prioritized_md"],
           description="de-duplicate, score and rank every finding"),
-    Phase("report", "reporting", 15, None,
+    Phase("report", "reporting", 16, None,
           description="HTML/Markdown reports and JSON/CSV exports"),
 ]
 
@@ -137,6 +141,7 @@ DEFAULT_FILES: Dict[str, List[str]] = {
     "subdomains": ["subdomains", "all_subdomains.txt"],
     "live_hosts": ["dns", "live_hosts.txt"],
     "live_hosts_details": ["dns", "httpx_details.json"],
+    "takeover_candidates": ["takeover", "candidates.json"],
     "ports": ["ports", "all_ports.txt"],
     "urls": ["content_discovery", "all_urls.txt"],
     "js_files": ["content_discovery", "js_files.txt"],
@@ -657,7 +662,7 @@ class SyncHunt:
             self.logger.error(f"could not write JSON report: {exc}")
 
     def _generate_reports(self, ctx: ScanContext) -> None:
-        self.logger.phase_banner("REPORT GENERATION", 15)
+        self.logger.phase_banner("REPORT GENERATION", 16)
         self.scan_end = datetime.now()
 
         findings = []
@@ -869,7 +874,7 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
 Examples:
   synchunt -d example.com                      # run the configured profile
   synchunt -d example.com --profile quick      # 5-phase fast pass
-  synchunt -d example.com --full               # all 15 phases
+  synchunt -d example.com --full               # all 16 phases
   synchunt -d example.com --phase subdomain,validation,report
   synchunt -l targets.txt --profile balanced --resume
   synchunt -d example.com --scope-file scope.txt --out-of-scope-file oos.txt
@@ -887,7 +892,7 @@ Examples:
     scan_group = parser.add_argument_group("Scanning")
     scan_group.add_argument("--profile", help="config profile: quick|balanced|full|deep")
     scan_group.add_argument("--phase", help="comma-separated phases to run")
-    scan_group.add_argument("--full", action="store_true", help="run all 15 phases")
+    scan_group.add_argument("--full", action="store_true", help="run all 16 phases")
     scan_group.add_argument("--resume", action="store_true",
                             help="continue the latest run for this target")
     scan_group.add_argument("--dry-run", action="store_true",

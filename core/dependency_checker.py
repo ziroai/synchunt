@@ -54,6 +54,13 @@ class DependencyChecker:
             "required": False,
             "category": "Subdomain Enumeration",
         },
+        "chaos": {
+            "check": ["chaos", "-version"],
+            "verify": "chaos",
+            "install": "go install -v github.com/projectdiscovery/chaos-client/cmd/chaos@latest",
+            "required": False,
+            "category": "Subdomain Enumeration",
+        },
         "gotator": {
             "check": ["gotator", "-h"],
             "install": "go install github.com/Josue87/gotator@latest",
@@ -105,6 +112,12 @@ class DependencyChecker:
             "category": "Port Scanning",
         },
         # ---------------- Fingerprinting ----------------
+        "rustscan": {
+            "check": ["rustscan", "--version"],
+            "install": "docker pull rustscan/rustscan:latest  (or cargo install rustscan)",
+            "required": False,
+            "category": "Port Scanning",
+        },
         "whatweb": {
             "check": ["whatweb", "--version"],
             "install": "sudo apt install whatweb -y",
@@ -185,6 +198,24 @@ class DependencyChecker:
             "required": False,
             "category": "Content Discovery",
         },
+        "gobuster": {
+            "check": ["gobuster", "version"],
+            "install": "go install github.com/OJ/gobuster/v3@latest",
+            "required": False,
+            "category": "Content Discovery",
+        },
+        "waymore": {
+            "check": ["waymore", "--version"],
+            "install": "pip install waymore",
+            "required": False,
+            "category": "Content Discovery",
+        },
+        "arjun": {
+            "check": ["arjun", "--help"],
+            "install": "pip install arjun",
+            "required": False,
+            "category": "Content Discovery",
+        },
         # ---------------- JS analysis ----------------
         "linkfinder": {
             "check": ["linkfinder", "-h"],
@@ -195,6 +226,24 @@ class DependencyChecker:
         "secretfinder": {
             "check": ["secretfinder", "-h"],
             "install": "pip install secretfinder",
+            "required": False,
+            "category": "JS Analysis",
+        },
+        "jsluice": {
+            "check": ["jsluice", "-h"],
+            "install": "go install github.com/BishopFox/jsluice/cmd/jsluice@latest",
+            "required": False,
+            "category": "JS Analysis",
+        },
+        "trufflehog": {
+            "check": ["trufflehog", "--version"],
+            "install": "curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin",
+            "required": False,
+            "category": "JS Analysis",
+        },
+        "gitleaks": {
+            "check": ["gitleaks", "version"],
+            "install": "go install github.com/gitleaks/gitleaks/v8@latest",
             "required": False,
             "category": "JS Analysis",
         },
@@ -236,6 +285,30 @@ class DependencyChecker:
             "required": False,
             "category": "Vulnerability Scanning",
         },
+        "wapiti": {
+            "check": ["wapiti", "--version"],
+            "install": "pip install wapiti3",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        "ghauri": {
+            "check": ["ghauri", "--version"],
+            "install": "pip install ghauri",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        "xsstrike": {
+            "check": ["xsstrike", "--help"],
+            "install": "pip install xsstrike  (or clone github.com/s0md3v/XSStrike)",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
+        "wpscan": {
+            "check": ["wpscan", "--version"],
+            "install": "gem install wpscan",
+            "required": False,
+            "category": "Vulnerability Scanning",
+        },
         # ---------------- Screenshots ----------------
         "gowitness": {
             "check": ["gowitness", "-h"],
@@ -248,6 +321,12 @@ class DependencyChecker:
             "install": "Download from https://github.com/michenriksen/aquatone/releases",
             "required": False,
             "category": "Screenshots",
+        },
+        "subjack": {
+            "check": ["subjack", "-h"],
+            "install": "go install github.com/haccer/subjack@latest",
+            "required": False,
+            "category": "Subdomain Takeover",
         },
         # ---------------- Cloud / sensitive info ----------------
         "s3scanner": {

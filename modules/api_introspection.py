@@ -107,7 +107,7 @@ class APIIntrospector:
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
-        self.logger.phase_banner("API DISCOVERY", 8)
+        self.logger.phase_banner("API DISCOVERY", 9)
         started = time.time()
 
         hosts = self._hosts()
