@@ -310,6 +310,13 @@ api_introspection:
   graphql: true
   actuator: true
   report_health: false           # /health,/metrics,/status are recorded as assets only
+  bruteforce:
+    enabled: true                # kiterunner-style API route discovery
+    wordlist: ""                 # optional file; supplements the built-in list
+    threads: 15
+    max_paths: 80
+    max_hosts: 10                # route bruteforce is capped to the first N hosts
+    status_codes: [200, 201, 204, 301, 302, 401, 403, 405]
 
 # ------------------------------------------------------------------
 # Phase 10 - JavaScript analysis
@@ -364,6 +371,14 @@ cloud_enum:
 # ------------------------------------------------------------------
 vuln_scanning:
   enabled: true
+  oob:
+    enabled: false               # publish a callback endpoint (see docs/WORKFLOW.md)
+    provider: webhook            # webhook | interactsh | custom
+    custom_url: ""               # provider: custom - your own collector
+    interactsh_server: "oast.pro"
+    probe_params: false          # inject the callback into params (SSRF/XXE)
+    max_urls: 10
+    wait: 5                      # seconds to wait for callbacks before polling
   nuclei:
     enabled: true
     templates: ""

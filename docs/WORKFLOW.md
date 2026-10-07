@@ -82,8 +82,30 @@ Useful output: `content_discovery/all_urls.txt`, `params/all_params.txt`, `api_i
 python3 main.py -d example.com --phase vulnscan --profile balanced --rate-limit 25
 ```
 
+- API route brute force first (`api_introspection.bruteforce`, on by default): a 70-path built-in
+  wordlist finds undocumented routes; `admin`/`internal`/`private`/`debug`/`env`/`backup` hits are
+  reported as findings so you can check authorisation by hand.
 - nuclei (templates), nikto, wapiti, dalfox/xsstrike (XSS), sqlmap/ghauri (SQLi), crlfuzz, corsy, wpscan (WordPress), plus the built-in open-redirect candidate check.
-- For **blind XSS/SSRF** pass an out-of-band URL: `vuln_scanning.dalfox.blind_xss: "https://your-callback.example/x"`.
+### Out-of-band confirmation (blind XSS / SSRF / XXE)
+
+Blind bugs only show up when the target calls *you*. Enable the built-in OOB client:
+
+```yaml
+vuln_scanning:
+  oob:
+    enabled: true
+    provider: webhook        # webhook.site (plaintext) | interactsh | custom
+    custom_url: ""           # provider: custom -> your collector / Burp Collaborator
+    probe_params: false      # true = inject callbacks into parameters (SSRF/XXE)
+```
+
+- With OOB enabled, `dalfox` automatically receives a blind-XSS callback (`-b`) and any callback that
+  arrives becomes a **high-confidence `oob` finding** (`vulnerabilities/oob_interactions.json`).
+- `probe_params: true` additionally injects the callback into discovered parameters up to
+  `oob.max_urls` - it modifies requests, so only turn it on where the program allows it.
+- `interactsh` works too, but the Python standard library has no AES, so its encrypted interaction
+  payloads are reported as observations (count/time) rather than decoded. Use `webhook` or
+  `custom` when you need full request bodies.
 
 Everything lands in the SQLite database, is de-duplicated by fingerprint and scored (P1–P4) in phase 15.
 

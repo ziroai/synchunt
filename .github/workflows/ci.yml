@@ -48,3 +48,40 @@ jobs:
           python main.py --list-phases
           python main.py --check-deps || true
           python main.py -d example.com --dry-run --output-dir /tmp/synchunt-ci
+
+      - name: Parallel verification sweep
+        run: ./scripts/check.sh --quick
+
+  assets:
+    name: action + container assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate action.yml
+        run: |
+          python - <<'PY'
+          import yaml
+          action = yaml.safe_load(open("action.yml"))
+          assert action["runs"]["using"] == "composite", action["runs"]["using"]
+          for key in ("target", "profile", "fail-on", "upload-sarif"):
+              assert key in action["inputs"], key
+          assert {"findings", "critical", "high", "report-dir"} <= set(action["outputs"])
+          print(f"action.yml ok: {len(action['runs']['steps'])} steps")
+          PY
+      - name: Validate Dockerfile structure
+        run: |
+          python - <<'PY'
+          import re
+          src = open("Dockerfile").read()
+          assert 'ENTRYPOINT ["synchunt"]' in src
+          assert "USER hunter" in src
+          stages = re.findall(r"^FROM (\S+) AS (\w+)", src, re.M)
+          assert ("python:3.12-slim", "base") in stages, stages
+          assert ("base", "slim") in stages and ("base", "full") in stages
+          print("Dockerfile ok:", stages)
+          PY
+      - name: Build slim image
+        run: docker build --target slim -t synchunt:slim .

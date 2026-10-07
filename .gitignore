@@ -61,3 +61,6 @@ wordlists/*.txt
 
 # Keep the wordlists folder structure
 !wordlists/.gitkeep
+
+# Parallel verification output (scripts/check.sh)
+.check/

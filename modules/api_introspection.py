@@ -41,6 +41,26 @@ DOC_PATHS = [
     "/.well-known/openapi.json",
 ]
 
+# Built-in API route wordlist. A config `wordlist` file supplements this list
+# rather than replacing it, so a missing wordlist never disables the check.
+BRUTEFORCE_PATHS = [
+    "v1", "v2", "v3", "v0", "api", "api/v1", "api/v2", "api/v3",
+    "api/internal", "api/private", "api/public", "api/admin", "api/users",
+    "api/login", "api/token", "api/health", "api/status", "api/version",
+    "api/config", "api/settings", "api/search", "api/upload", "api/files",
+    "api/orders", "api/products", "api/payments", "api/webhooks",
+    "rest", "rest/v1", "rpc", "graphql", "graphiql", "api/graphql",
+    "gql", "query", "internal", "private", "admin", "admin/api",
+    "manage", "management", "console", "debug", "metrics", "status",
+    "health", "healthz", "readyz", "livez", "version", "info",
+    "auth", "oauth", "oauth/token", "login", "logout", "register",
+    "users", "user", "me", "profile", "accounts", "sessions",
+    "config", "settings", "env", "backup", "export", "import",
+    "test", "dev", "staging", "swagger", "swagger-ui", "openapi.json",
+    "webhooks", "callbacks", "hooks", "events", "jobs", "tasks",
+    "report", "reports", "dashboard", "monitor", "probe",
+]
+
 API_BASE_PATHS = [
     "/api",
     "/api/v1",
@@ -85,6 +105,22 @@ class APIIntrospector:
         self.max_hosts = self.config.get_int("api_introspection.max_hosts", 100)
         self.detect_graphql = self.config.get_bool("api_introspection.graphql", True)
         self.detect_actuator = self.config.get_bool("api_introspection.actuator", True)
+        self.bruteforce = self.config.get_bool("api_introspection.bruteforce.enabled", True)
+        self.bruteforce_threads = max(
+            1, self.config.get_int("api_introspection.bruteforce.threads", 15)
+        )
+        self.bruteforce_max = max(
+            1, self.config.get_int("api_introspection.bruteforce.max_paths", 80)
+        )
+        self.bruteforce_max_hosts = max(
+            1, self.config.get_int("api_introspection.bruteforce.max_hosts", 10)
+        )
+        self.bruteforce_hosts: set = set()
+        self.bruteforce_statuses = self.config.get_list(
+            "api_introspection.bruteforce.status_codes",
+            [200, 201, 204, 301, 302, 401, 403, 405],
+        ) or [200, 401, 403, 405]
+        self.bruteforce_hits: List[str] = []
         self.report_health = self.config.get_bool("api_introspection.report_health", False)
         self.timeout = max(3, min(self.config.get_int("general.timeout", 10), 15))
         self.specs: List[Dict] = []
@@ -115,6 +151,14 @@ class APIIntrospector:
             self.logger.warning("No in-scope hosts for API discovery")
             return self.output_dir
 
+        # Route brute forcing is the loudest check in this phase, so it is
+        # limited to the first N hosts (config: bruteforce.max_hosts).
+        self.bruteforce_hosts = set(hosts[: self.bruteforce_max_hosts])
+        if self.bruteforce and len(hosts) > len(self.bruteforce_hosts):
+            self.logger.info(
+                f"API route bruteforce limited to {len(self.bruteforce_hosts)} "
+                f"of {len(hosts)} host(s)"
+            )
         self.logger.info(f"Probing {len(hosts)} host(s) for API surfaces...")
         workers = max(1, min(self.ctx.threads(), 16, len(hosts)))
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -172,6 +216,9 @@ class APIIntrospector:
                     self._probe_graphql(url)
             elif self.detect_graphql and "graphql" in path and result.status in (400, 405):
                 self._probe_graphql(url)
+
+        if self.bruteforce and base in self.bruteforce_hosts:
+            self._bruteforce_host(base)
 
         if self.detect_actuator:
             for path in ACTUATOR_PATHS:
@@ -322,6 +369,103 @@ class APIIntrospector:
             self.logger.vuln(f"Exposed management endpoint: {url}")
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # API route brute forcing (kiterunner-style, read-only probes)
+    # ------------------------------------------------------------------
+    def bruteforce_paths(self) -> List[str]:
+        """User-supplied wordlist first (highest priority), built-ins after."""
+        paths: List[str] = []
+        wordlist = self.config.get("api_introspection.bruteforce.wordlist", "") or ""
+        if wordlist:
+            if os.path.exists(wordlist):
+                paths.extend(
+                    line.strip().lstrip("/")
+                    for line in read_file_lines(wordlist)
+                    if line.strip() and not line.strip().startswith("#")
+                )
+            else:
+                self.logger.debug(f"api wordlist not found: {wordlist}")
+        paths.extend(BRUTEFORCE_PATHS)
+        # de-duplicate, keep a stable order, cap the run
+        seen = set()
+        ordered = []
+        for path in paths:
+            key = path.strip("/").lower()
+            if key and key not in seen:
+                seen.add(key)
+                ordered.append(key)
+        return ordered[: self.bruteforce_max]
+
+    def _bruteforce_host(self, base: str) -> None:
+        if not self.bruteforce_hosts:
+            self.bruteforce_hosts = {base}
+        paths = self.bruteforce_paths()
+        if not paths:
+            return
+        base = base.rstrip("/")
+        workers = max(1, min(self.bruteforce_threads, len(paths)))
+
+        def probe_path(path: str):
+            url = f"{base}/{path}"
+            return url, probe(
+                self.ctx.session, url, limiter=self.ctx.limiter,
+                timeout=self.timeout, max_bytes=32768,
+            )
+
+        hits: List[str] = []
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(probe_path, path) for path in paths]
+            for future in as_completed(futures):
+                try:
+                    url, result = future.result()
+                except Exception as exc:  # pragma: no cover - defensive
+                    self.logger.debug(f"api bruteforce probe failed: {exc}")
+                    continue
+                if result.status not in self.bruteforce_statuses:
+                    continue
+                if not result.reachable:
+                    continue
+                hits.append(url)
+                self.endpoints.append(url)
+                self.bruteforce_hits.append(url)
+
+                # A route that returns a spec document is as good as a published one.
+                if result.status == 200 and result.text:
+                    spec = self._parse_spec(result, url)
+                    if spec:
+                        self.specs.append(spec)
+                        self.logger.found(
+                            f"API spec via route bruteforce: {url} "
+                            f"({len(spec.get('endpoints', []))} endpoints)"
+                        )
+                        self._spec_findings(spec)
+
+                if any(keyword in url.lower() for keyword in
+                       ("admin", "internal", "private", "debug", "env", "backup", "manage")):
+                    self.findings.append(
+                        Finding(
+                            category="api",
+                            title=f"Sensitive API route reachable: /{url.split('/', 3)[-1].lstrip('/')}",
+                            severity="medium" if result.status == 200 else "low",
+                            target=self.ctx.target,
+                            url=url,
+                            evidence=(
+                                f"HTTP {result.status} for an administrative/internal "
+                                "API route - verify authentication and authorisation manually"
+                            ),
+                            source="api_introspection",
+                            confidence="medium",
+                            tags=["api", "route-discovery", "access-control"],
+                        )
+                    )
+
+        if hits:
+            self.logger.found(f"{len(hits)} API route(s) discovered on {base}")
+            self.ctx.record_assets(
+                [Asset(kind="api_endpoint", value=url, source="api_introspection")
+                 for url in hits[:200]]
+            )
+
     def _write_outputs(self) -> None:
         specs_file = os.path.join(self.output_dir, "api_specs.json")
         save_json(self.specs, specs_file)
@@ -331,6 +475,11 @@ class APIIntrospector:
         save_json(self.graphql, graphql_file)
 
         endpoint_file = os.path.join(self.output_dir, "endpoints.txt")
+        if self.bruteforce_hits:
+            write_file_lines(
+                os.path.join(self.output_dir, "bruteforce.txt"),
+                sorted(set(self.bruteforce_hits)),
+            )
         all_endpoints = list(self.endpoints)
         for spec in self.specs:
             all_endpoints.extend(

@@ -14,6 +14,8 @@ import time
 from typing import Dict, List
 
 from core.models import Asset, Finding
+from core.net import http_request
+from core.oob import build_client as build_oob_client
 from core.utils import (
     load_json,
     read_file_lines,
@@ -47,6 +49,8 @@ class VulnScanner:
         )
         os.makedirs(self.output_dir, exist_ok=True)
         self.findings: List[Finding] = []
+        self.oob = None
+        self.oob_interactions: List[dict] = []
 
     # ------------------------------------------------------------------
     def run_all(self) -> str:
@@ -56,6 +60,8 @@ class VulnScanner:
         if not read_file_lines(self.live_hosts_file):
             self.logger.warning("No live hosts to scan")
             return self.output_dir
+
+        self._start_oob()
 
         if self.config.is_tool_enabled("vuln_scanning", "nuclei"):
             self.run_nuclei()
@@ -79,6 +85,9 @@ class VulnScanner:
             self.run_wpscan()
 
         self._check_open_redirects()
+        if self.oob is not None:
+            self.run_oob_param_probes()
+        self._collect_oob_findings()
         self._write_outputs()
         self.ctx.record_findings(self.findings)
 
@@ -89,6 +98,100 @@ class VulnScanner:
         return self.output_dir
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Out-of-band (OOB) collaboration
+    # ------------------------------------------------------------------
+    def _start_oob(self) -> None:
+        """Bring up the callback endpoint when OOB is enabled in config."""
+        client = build_oob_client(
+            self.config, session=self.ctx.session, limiter=self.ctx.limiter,
+            logger=self.logger, section="vuln_scanning",
+        )
+        if client is None:
+            return
+        if client.start():
+            self.oob = client
+        else:
+            self.logger.warning(
+                f"OOB provider unavailable ({client.error or 'unknown error'}) - "
+                "blind vulnerabilities cannot be confirmed out-of-band"
+            )
+
+    def run_oob_param_probes(self) -> None:
+        """
+        Inject the callback URL into parameterised URLs to catch SSRF/XXE-style
+        blind bugs. Disabled unless `vuln_scanning.oob.probe_params` is on: it
+        modifies requests, so enabling it is a deliberate decision per program.
+        """
+        if not self.config.get_bool("vuln_scanning.oob.probe_params", False):
+            return
+        if not self.params_file or not os.path.exists(self.params_file):
+            return
+        max_urls = max(1, self.config.get_int("vuln_scanning.oob.max_urls", 10))
+        urls = read_file_lines(self.params_file)[:max_urls]
+        if not urls:
+            return
+
+        out_file = os.path.join(self.output_dir, "oob_probes.txt")
+        probes = []
+        self.logger.info(f"Injecting OOB callbacks into {len(urls)} parameterised URL(s)...")
+        for url in urls:
+            callback = self.oob.probe_url("ssrf")
+            injected = _inject_callback(url, callback)
+            if not injected:
+                continue
+            probes.append(injected)
+            result = http_request(
+                self.ctx.session, "GET", injected, limiter=self.ctx.limiter,
+                timeout=15, max_bytes=16384,
+            )
+            if "oob" in injected and result.reachable:
+                pass  # a callback arrives out-of-band, not in this response
+        write_file_lines(out_file, probes)
+        if probes:
+            # give the target a moment to make its callback before polling
+            time.sleep(min(10, max(2, self.config.get_int("vuln_scanning.oob.wait", 5))))
+        self.logger.info(f"{len(probes)} OOB probe(s) sent")
+
+    def _collect_oob_findings(self) -> None:
+        """Turn observed callbacks into findings and artifacts, then stop."""
+        if self.oob is None:
+            return
+        try:
+            interactions = self.oob.poll()
+        except Exception as exc:  # pragma: no cover - network dependent
+            self.logger.warning(f"OOB polling failed: {exc}")
+            interactions = []
+
+        records = [interaction.to_dict() for interaction in interactions]
+        self.oob_interactions = records
+        if records:
+            save_json(records, os.path.join(self.output_dir, "oob_interactions.json"))
+            for record in records[:20]:
+                target_desc = record.get("path") or record.get("provider")
+                self.findings.append(
+                    Finding(
+                        category="oob",
+                        title="Out-of-band interaction confirmed (blind injection)",
+                        severity="high",
+                        confidence="high",
+                        target=self.ctx.target,
+                        url=str(record.get("path") or ""),
+                        evidence=truncate(
+                            f"Callback received via {record.get('provider')}: "
+                            f"{record.get('method')} {record.get('path')} "
+                            f"from {record.get('source_ip')} at {record.get('time')}",
+                            600,
+                        ),
+                        source="oob",
+                        tags=["oob", "blind", "ssrf", "xss"],
+                    )
+                )
+                self.logger.vuln(f"OOB interaction: {target_desc}")
+        else:
+            self.logger.info("OOB: no callbacks received during this scan")
+        self.oob.stop()
+
     def run_nuclei(self) -> None:
         nuclei_dir = os.path.join(self.output_dir, "nuclei")
         os.makedirs(nuclei_dir, exist_ok=True)
@@ -208,8 +311,11 @@ class VulnScanner:
             "-w", str(cfg.get("threads", 10)),
             "--silence", "-o", output_file,
         ]
-        if cfg.get("blind_xss"):
-            cmd += ["-b", str(cfg["blind_xss"])]
+        blind = cfg.get("blind_xss") or ""
+        if not blind and self.oob is not None:
+            blind = self.oob.probe_url("blindxss")
+        if blind:
+            cmd += ["-b", str(blind)]
         self.runner.run(cmd, tool_name="dalfox", timeout=3600)
 
         for line in read_file_lines(output_file):
@@ -646,6 +752,26 @@ def _severity_from_line(line: str) -> str:
         if f"[{level}]" in lowered:
             return level
     return "medium"
+
+
+def _inject_callback(url: str, callback: str) -> str:
+    """
+    Replace one parameter value with the callback URL.
+
+    Returns "" when the URL has no parameters, so nothing is requested for it.
+    """
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return ""
+    params = parse_qsl(parsed.query, keep_blank_values=True)
+    if not params:
+        return ""
+    name, _value = params[0]
+    new_query = [(name, callback)] + params[1:]
+    return urlunparse(parsed._replace(query=urlencode(new_query)))
 
 
 def _severity_from_cvss(score) -> str:

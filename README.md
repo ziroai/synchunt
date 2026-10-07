@@ -20,6 +20,10 @@
 ## ✨ Highlights
 
 - **16-phase pipeline, one command** — `--profile quick|balanced|full|deep` or pick phases with `--phase a,b,c`.
+- **Out-of-band confirmation** — blind XSS/SSRF/XXE callbacks via webhook.site, interactsh or your own
+  collector (`vuln_scanning.oob`), so blind bugs become high-confidence findings instead of guesses.
+- **API route brute forcing built in** — a 70-path built-in wordlist (supplementable) finds undocumented
+  API routes, with sensitive ones flagged for manual authorisation testing.
 - **Subdomain-takeover detection built in** — CNAME chains matched against 20 takeover-prone services
   (fingerprints and claimability rules from can-i-take-over-xyz), no binaries required.
 - **Scope enforced before active tooling** — wildcard domains, IPs/CIDRs and `host:port` entries; in-scope/out-of-scope files; nothing leaves your scope.
@@ -31,7 +35,7 @@
 - **Resumable** — re-run with `--resume` and completed phases are skipped.
 - **Graceful degradation** — every phase works with the tools you have; missing optional tools are skipped with a clear hint, and several phases have built-in fallbacks (crt.sh, HTTP prober, header fingerprinting, OpenAPI/GraphQL probes, cloud-bucket enumeration).
 - **Safe by construction** — no `shell=True` anywhere in the scanning path, rate-limited HTTP session, redacted secrets in output, escaped report rendering.
-- **Tested** — 80+ unit/integration tests, CI across Python 3.9–3.12.
+- **Tested** — 134 unit/integration tests, CI across Python 3.9–3.12, plus `./scripts/check.sh`.
 
 ---
 
@@ -63,6 +67,24 @@ synchunt --doctor       # console script; works outside the checkout
 
 Both entry points are equivalent — everything below uses `python3 main.py` for clarity;
 replace it with `synchunt` if you installed the package.
+
+**Docker** (batteries included: framework + subfinder, httpx, dnsx, naabu, nuclei, katana, gobuster, nmap, whatweb):
+
+```bash
+docker build -t synchunt .                       # add --target slim for framework-only
+docker run --rm -v "$PWD/output:/app/output" synchunt -d example.com --profile balanced
+```
+
+**GitHub Actions** — the repository is a composite action:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: ziroai/synchunt@main
+  with:
+    target: example.com
+    profile: balanced
+    fail-on: high          # fail the job on high/critical findings
+```
 
 ### First scan
 
@@ -170,10 +192,10 @@ python3 main.py -d target.com --profile balanced --json-report summary.json
 | 6 | `fingerprint` | tech-stack & WAF detection | whatweb, wafw00f, webanalyze + header heuristics |
 | 7 | `github_recon` | repositories, issues, leaked secrets | GitHub API (set `github_recon.token`) |
 | 8 | `content` | crawling, URLs, params, directories | katana, gospider, hakrawler, waybackurls, gau, waymore, paramspider, arjun, x8, dirsearch, feroxbuster, ffuf, gobuster |
-| 9 | `api_discovery` | OpenAPI/Swagger, GraphQL, actuator probes | built-in |
+| 9 | `api_discovery` | OpenAPI/Swagger, GraphQL, actuator probes + API route brute force | built-in (70-path wordlist) |
 | 10 | `jsanalysis` | JS endpoints + secret scanning (entropy-gated, redacted) | linkfinder, secretfinder, jsluice, trufflehog, gitleaks, custom regex |
 | 11 | `cloud_enum` | S3 / Azure / GCP bucket candidates | built-in |
-| 12 | `vulnscan` | vulnerability scanning | nuclei, nikto, wapiti, dalfox, xsstrike, sqlmap, ghauri, crlfuzz, corsy, wpscan |
+| 12 | `vulnscan` | vulnerability scanning + OOB confirmation | nuclei, nikto, wapiti, dalfox, xsstrike, sqlmap, ghauri, crlfuzz, corsy, wpscan + built-in OOB client |
 | 13 | `sensitive` | dorking & exposed-data checks | GitHub/Google dorking, shodan, s3scanner |
 | 14 | `screenshot` | visual recon | gowitness, aquatone |
 | 15 | `prioritize` | de-dup, score, rank (P1–P4) | built-in |
@@ -295,8 +317,9 @@ notifications:
 
 ```bash
 pip install -r requirements-dev.txt
+./scripts/check.sh                         # everything below, in parallel
 
-python3 -m pytest tests -q                 # 121 unit + integration tests
+python3 -m pytest tests -q                 # 134 unit + integration tests
 python3 -m pyflakes core modules reports main.py tests
 python3 -m compileall -q core modules reports main.py
 
@@ -314,6 +337,7 @@ CI (`.github/workflows/ci.yml`) runs all of the above on Python 3.9–3.12.
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | beginner roadmap: what to learn in what order, with labs and practice loops |
 | [`docs/TOOL-COVERAGE.md`](docs/TOOL-COVERAGE.md) | every tool in the standard bug-bounty stack and exactly what SyncHunt does with it |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | design, database schema, how to add a phase or a tool |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | local install, Docker, CI action, unattended scanning |
 
 ---
 

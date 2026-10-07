@@ -78,7 +78,7 @@ everything that is missing.
 | XSS | Dalfox | Integrated — `vuln_scanning.dalfox` (blind XSS via `-b`) |
 | XSS | XSStrike | Integrated — `vuln_scanning.xsstrike` |
 | XSS | XSS Hunter | Manual — supply a `dalfox.blind_xss` callback URL (or an interactsh URL) and skip running your own hunter |
-| SSRF / OOB | Interactsh, Burp Collaborator, Webhook.site | Manual / companion — generate a callback domain and pass it as `vuln_scanning.dalfox.blind_xss` (dalfox injects it); the framework does not yet run an interactsh client |
+| SSRF / OOB | Interactsh, Burp Collaborator, Webhook.site | **Integrated** — `core/oob.py` registers a callback endpoint and polls it: `webhook` (webhook.site, plaintext interactions), `interactsh` (register/poll; payloads are AES-encrypted so interactions are reported as observations), or `custom` (your own collector / Burp Collaborator). Dalfox blind XSS is wired automatically; `oob.probe_params` injects callbacks into parameters for SSRF/XXE. Interactions become high-confidence findings (`oob_interactions.json`) |
 | Open redirect | Corsy (CORS) | Integrated — `vuln_scanning.corsy` for CORS, plus a built-in open-redirect **candidate** check that deliberately only lists URLs and never follows attacker-controlled redirects |
 | Open redirect | Oralyzer | Manual — candidates are written by `vuln_scanning`; feed them to Oralyzer or a nuclei `-tags redirect` run |
 | Subdomain takeover | Subjack | Integrated (optional cross-check) — `subdomain_takeover.subjack` |
@@ -97,7 +97,7 @@ everything that is missing.
 | Tool | Status | Where |
 |---|---|---|
 | Postman / Insomnia | Manual / companion | use `api_intelligence/api_specs.json` and `endpoints.txt` as the collection source |
-| Kiterunner | Manual | spec-based discovery is automated (`api_intelligence`); kiterunner is the natural next step for blind route bruteforcing |
+| Kiterunner | Built-in equivalent | `api_introspection.bruteforce` probes a 70-path built-in wordlist (supplementable, capped at `max_paths`/`max_hosts`) against every host and reports route hits, spec documents found by fuzzing, and sensitive routes (`admin`, `internal`, `private`, `debug`, `env`, `backup`) as findings |
 | Akto | Manual | feed it exported traffic/URLs; SyncHunt's role is discovery |
 | Burp extensions (Autorize, AuthMatrix, Param Miner, Logger++, Turbo Intruder, JWT Editor) | Manual / companion | authorization and JWT testing needs a human in the loop; SyncHunt hands over authenticated-request context and param lists |
 
@@ -123,7 +123,7 @@ everything that is missing.
 | anew, qsreplace, gf, unfurl | Built-in equivalents | dedup, param swapping, grep-patterns and URL parsing are done in-process by `core/utils.py` — no shell pipelines needed |
 | httpx pipelines (tomnomnom) | Built-in | the phases pass files between each other; `scan_state.json` + the SQLite DB keep the pipeline state |
 | Notify | Integrated equivalent | `reports/notifier.py` posts scan summaries/critical findings to Slack, Discord or Telegram |
-| Axiom, Interlace | Manual / companion | run one SyncHunt process per host/cloud agent and aggregate the `--json-report` outputs |
+| Axiom, Interlace | Manual / companion | run one SyncHunt process per host/cloud agent and aggregate the `--json-report` outputs; `scripts/check.sh` runs the local verification suite in parallel |
 | CyberChef | Manual | decoding step when triaging findings |
 | Wappalyzer, BuiltWith | Integrated equivalent | `fingerprinting` (webanalyze + whatweb + header heuristics) |
 | Google dorking | Integrated | `sensitive_info.google_dorking` generates ready-to-click dork URLs |
