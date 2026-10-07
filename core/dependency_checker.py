@@ -45,6 +45,18 @@ class DependencyChecker:
             'required': True,
             'category': 'Validation'
         },
+        'puredns': {
+            'check': 'puredns --version',
+            'install': 'go install github.com/d3mondev/puredns/v2@latest',
+            'required': False,
+            'category': 'Subdomain Enumeration'
+        },
+        'gotator': {
+            'check': 'gotator -h',
+            'install': 'go install github.com/Josue87/gotator@latest',
+            'required': False,
+            'category': 'Subdomain Enumeration'
+        },
         'dnsx': {
             'check': 'dnsx -version',
             'install': 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest',
@@ -110,6 +122,18 @@ class DependencyChecker:
             'install': 'go install -v github.com/sensepost/gowitness@latest',
             'required': False,
             'category': 'Screenshots'
+        },
+        'ffuf': {
+            'check': 'ffuf -V',
+            'install': 'go install github.com/ffuf/ffuf@latest',
+            'required': False,
+            'category': 'Content Discovery'
+        },
+        'x8': {
+            'check': 'x8 --version',
+            'install': 'cargo install x8',
+            'required': False,
+            'category': 'Content Discovery'
         },
 
         # System tools

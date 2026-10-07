@@ -39,6 +39,8 @@ class SubdomainEnumerator:
             ('findomain', self.run_findomain),
             ('crtsh', self.run_crtsh),
             ('sublist3r', self.run_sublist3r),
+            ('puredns', self.run_puredns),
+            ('gotator', self.run_gotator),
         ]
 
         for tool_name, tool_func in tools:
@@ -221,6 +223,71 @@ class SubdomainEnumerator:
             tool_name="sublist3r",
             timeout=600
         )
+
+        subdomains = read_file_lines(output_file)
+        self.all_subdomains.update(subdomains)
+        return subdomains
+
+    def run_puredns(self):
+        """Run puredns for active subdomain bruteforcing."""
+        self.logger.info("Running puredns (Active Bruteforcing)...")
+        output_file = os.path.join(self.output_dir, "puredns.txt")
+        
+        tool_config = self.config.get_tool_config('subdomain_enum', 'puredns')
+        wordlist = tool_config.get('wordlist', 'wordlists/resolvers.txt')
+        resolvers = tool_config.get('resolvers', 'wordlists/resolvers.txt')
+
+        if not os.path.exists(wordlist):
+            self.logger.warning(f"puredns wordlist not found: {wordlist}")
+            return []
+
+        cmd = f"puredns bruteforce {wordlist} {self.target} -r {resolvers} -w {output_file}"
+        
+        result = self.runner.run(
+            cmd,
+            tool_name="puredns",
+            timeout=1800
+        )
+
+        subdomains = read_file_lines(output_file)
+        self.all_subdomains.update(subdomains)
+        return subdomains
+
+    def run_gotator(self):
+        """Run gotator for subdomain permutations."""
+        self.logger.info("Running gotator (Permutations)...")
+        output_file = os.path.join(self.output_dir, "gotator.txt")
+        
+        tool_config = self.config.get_tool_config('subdomain_enum', 'gotator')
+        permutations = tool_config.get('permutations', 'wordlists/permutations.txt')
+        
+        # We need existing subdomains to permute
+        if not self.all_subdomains:
+            self.logger.warning("No subdomains found to permute.")
+            return []
+
+        # Save current subdomains to a temp file
+        temp_subs = os.path.join(self.output_dir, "temp_subs_for_gotator.txt")
+        write_file_lines(temp_subs, list(self.all_subdomains))
+
+        cmd = f"gotator -sub {temp_subs} -perm {permutations} -depth {tool_config.get('depth', 1)} -silent"
+        
+        # gotator generates to stdout, we capture it and pipe to puredns for resolution
+        resolvers = self.config.get_tool_config('subdomain_enum', 'puredns').get('resolvers', 'wordlists/resolvers.txt')
+        
+        pipe_cmds = [
+            cmd,
+            f"puredns resolve -r {resolvers} -w {output_file}"
+        ]
+
+        result = self.runner.pipe_commands(
+            pipe_cmds,
+            tool_name="gotator",
+        )
+
+        # Cleanup temp file
+        if os.path.exists(temp_subs):
+            os.remove(temp_subs)
 
         subdomains = read_file_lines(output_file)
         self.all_subdomains.update(subdomains)

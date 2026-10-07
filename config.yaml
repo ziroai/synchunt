@@ -40,6 +40,15 @@ subdomain_enum:
   sublist3r:
     enabled: true
     threads: 30
+  puredns:
+    enabled: true
+    wordlist: "wordlists/resolvers.txt"  # You should provide a large DNS wordlist for bruteforcing
+    resolvers: "wordlists/resolvers.txt"
+  gotator:
+    enabled: true
+    permutations: "wordlists/permutations.txt"
+    depth: 1
+    threads: 100
 
 # --- Subdomain Validation ---
 subdomain_validation:
@@ -127,6 +136,15 @@ content_discovery:
     wordlist: "wordlists/raft-medium-directories.txt"
     threads: 50
     depth: 2
+  ffuf:
+    enabled: true
+    wordlist: "wordlists/raft-medium-directories.txt"
+    threads: 40
+    extensions: "php,asp,html,js,json,txt"
+  x8:
+    enabled: true
+    wordlist: "wordlists/parameters.txt"
+    threads: 20
 
 # --- JS Analysis ---
 js_analysis:

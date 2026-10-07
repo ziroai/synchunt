@@ -70,6 +70,8 @@ class ContentDiscovery:
         dir_tools = [
             ('dirsearch', self.run_dirsearch),
             ('feroxbuster', self.run_feroxbuster),
+            ('ffuf', self.run_ffuf),
+            ('x8', self.run_x8),
         ]
 
         for tool_name, tool_func in dir_tools:
@@ -325,6 +327,84 @@ class ContentDiscovery:
             )
 
         self.logger.found("feroxbuster: Directory discovery complete")
+
+    def run_ffuf(self):
+        """Run ffuf for high-speed directory brute-forcing."""
+        self.logger.info("Running ffuf...")
+
+        tool_config = self.config.get_tool_config('content_discovery', 'ffuf')
+        output_dir_path = os.path.join(self.dirs_dir, "ffuf")
+        os.makedirs(output_dir_path, exist_ok=True)
+
+        wordlist = tool_config.get('wordlist', 'wordlists/raft-medium-directories.txt')
+        threads = tool_config.get('threads', 40)
+        extensions = tool_config.get('extensions', 'php,asp,html,js,json,txt')
+
+        if not os.path.exists(wordlist):
+            self.logger.warning(f"Wordlist not found: {wordlist}, skipping ffuf")
+            return
+
+        live_hosts = read_file_lines(self.live_hosts_file)
+
+        for host in live_hosts[:10]:  # Limit
+            safe_host = host.replace('https://', '').replace('http://', '')
+            safe_host = safe_host.replace('/', '_').replace(':', '_')
+            output_file = os.path.join(output_dir_path, f"{safe_host}.json")
+
+            cmd = (
+                f"ffuf -u {host}/FUZZ "
+                f"-w {wordlist} "
+                f"-t {threads} "
+                f"-e .{extensions.replace(',', ',.')} "
+                f"-o {output_file} -of json -s"
+            )
+
+            self.runner.run(
+                cmd,
+                tool_name=f"ffuf-{safe_host[:30]}",
+                timeout=600
+            )
+
+        self.logger.found("ffuf: Directory discovery complete")
+
+    def run_x8(self):
+        """Run x8 for hidden parameter discovery."""
+        self.logger.info("Running x8 (Parameter Discovery)...")
+
+        tool_config = self.config.get_tool_config('content_discovery', 'x8')
+        output_dir_path = os.path.join(self.params_dir, "x8")
+        os.makedirs(output_dir_path, exist_ok=True)
+
+        wordlist = tool_config.get('wordlist', 'wordlists/parameters.txt')
+        threads = tool_config.get('threads', 20)
+
+        if not os.path.exists(wordlist):
+            self.logger.warning(f"Wordlist not found: {wordlist}, skipping x8")
+            return
+
+        # We need URLs with potential hidden params.
+        # We can use live hosts directly
+        live_hosts = read_file_lines(self.live_hosts_file)
+
+        for host in live_hosts[:10]:
+            safe_host = host.replace('https://', '').replace('http://', '')
+            safe_host = safe_host.replace('/', '_').replace(':', '_')
+            output_file = os.path.join(output_dir_path, f"{safe_host}.txt")
+
+            cmd = (
+                f"x8 -u {host} "
+                f"-w {wordlist} "
+                f"-c {threads} "
+                f"-O {output_file}"
+            )
+
+            self.runner.run(
+                cmd,
+                tool_name=f"x8-{safe_host[:30]}",
+                timeout=600
+            )
+
+        self.logger.found("x8: Parameter discovery complete")
 
     def _merge_and_categorize(self):
         """Merge all URLs and categorize them."""
