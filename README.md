@@ -1,210 +1,426 @@
 <div align="center">
 
-# ⚔️ SyncHunt — Automated Bug Hunting Recon Framework
+![Synchunt Banner](https://img.shields.io/badge/SyncHunt-Advanced%20Recon%20Framework-ff6b6b?style=for-the-badge&logoColor=white)
 
-<img src="https://img.shields.io/badge/Python-3.8%2B-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-<img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
-<img src="https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge" alt="Status">
-<img src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-black?style=for-the-badge&logo=linux" alt="Platform">
+# ⚔️ SyncHunt v2026 — Advanced Automated Bug Hunting Reconnaissance Framework
 
-> 🎯 **Modular, automated reconnaissance framework for professional bug bounty hunters and security researchers**
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-3776ab?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![License MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![Status Active](https://img.shields.io/badge/Status-Active%20Development-brightgreen?style=for-the-badge)](https://github.com/ziroai/synchunt)
+[![Platform Linux/macOS](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-black?style=for-the-badge&logo=linux)](https://github.com/ziroai/synchunt)
 
-[Features](#-features) • [Setup](#-quick-setup) • [Usage](#-usage) • [Requirements](#-requirements) • [Contributing](#-contributing)
+**Next-generation automated reconnaissance framework for bug bounty hunters, penetration testers, and security researchers**
+
+> Combines subdomain discovery, API mapping, GitHub intelligence, cloud exposure checks, and vulnerability scanning into a single unified automated workflow.
+
+[![GitHub Stars](https://img.shields.io/github/stars/ziroai/synchunt?style=social)](https://github.com/ziroai/synchunt)
+[![GitHub Forks](https://img.shields.io/github/forks/ziroai/synchunt?style=social)](https://github.com/ziroai/synchunt)
+
+[🎯 Features](#-features) • [⚡ Quick Start](#-quick-start) • [📖 Documentation](#-documentation) • [🛠️ Usage](#-usage) • [🔧 Configuration](#-configuration) • [📊 Architecture](#-architecture)
+
+---
 
 </div>
 
----
-
 ## 🎯 Features
 
-### 🔍 Subdomain Enumeration
-Multiple intelligence sources for maximum coverage
-- Subfinder • Amass • Assetfinder • Findomain • crt.sh • Sublist3r
+### **Core Reconnaissance**
 
-### ✅ Subdomain Validation
-Verify live and responsive assets efficiently
-- httpx • dnsx • massdns
+<div align="center">
 
-### 🔓 Port Scanning
-Enumerate open ports and services
-- Naabu • Nmap • Masscan
+| Feature | Tools | Coverage |
+|---------|-------|----------|
+| **🔍 Subdomain Enumeration** | Subfinder, Amass, Assetfinder, Findomain, crt.sh, Sublist3r, PureDNS | 8+ sources |
+| **✅ Subdomain Validation** | httpx, dnsx, massdns | DNS + HTTP verification |
+| **🌐 Content Discovery** | Katana, GoSpider, Hakrawler, waybackurls, gau, ParamSpider, dirsearch, feroxbuster, FFUF | 9+ crawlers |
+| **🔓 Port Scanning** | Naabu, Nmap, Masscan | Fast + detailed scans |
+| **🧩 Web Fingerprinting** | WhatWeb, wafw00f, webanalyze | Tech stack detection |
 
-### 🧩 Web Fingerprinting
-Identify technologies and exposed stacks
-- WhatWeb • wafw00f • webanalyze
+</div>
 
-### 🌐 Content Discovery
-Find hidden files, paths, and endpoints
-- Katana • GoSpider • Hakrawler • waybackurls • gau • ParamSpider • dirsearch • feroxbuster
+### **Advanced Intelligence**
 
-### 🔬 JavaScript Analysis
-Uncover exposed secrets and patterns in front-end code
-- LinkFinder • SecretFinder • Custom regex detection
+<div align="center">
 
-### 🚨 Vulnerability Scanning
-Automated testing against common vulnerabilities
-- Nuclei • Nikto • Dalfox • SQLMap • CRLFuzz • Corsy
+| Feature | Capability | Status |
+|---------|-----------|--------|
+| **🔌 API Discovery** | GraphQL, OpenAPI, Swagger detection | ✅ Advanced |
+| **🐙 GitHub Recon** | Repos, issues, exposed secrets, commits | ✅ Advanced |
+| **☁️ Cloud Enumeration** | S3, Azure Blob, GCP buckets | ✅ Advanced |
+| **📄 JS Analysis** | Endpoint extraction, secret scanning, source maps | ✅ Advanced |
+| **🔑 Sensitive Info** | Credentials, API keys, tokens, misconfigs | ✅ Advanced |
+| **🎯 Finding Prioritization** | ML-based scoring, severity ranking, deduplication | ✅ Advanced |
 
-### 🔑 Sensitive Information Discovery
-Search for exposed credentials, tokens, and misconfigurations
-- S3Scanner • GitHub Dorking • Shodan • Google Dorks
+</div>
 
-### 📸 Visual Verification
-Capture screenshots for quick manual review
-- Gowitness • Aquatone
+### **Post-Processing & Reporting**
 
-### 📊 Professional Reporting
-Generate structured results with actionable intelligence
-- HTML reports • Markdown summaries • Findings tracking
+- 📊 **SQLite Correlation** - Result deduplication and relationship mapping
+- 📈 **HTML Reports** - Interactive, professional findings summaries
+- 📋 **CSV/JSON Exports** - Downstream analysis and integration
+- 🎨 **Screenshot Capture** - Visual verification with Gowitness/Aquatone
+- 🔔 **Notifications** - Slack, Discord, Telegram integration
 
 ---
 
-## 🚀 Quick Setup
+## ⚡ Quick Start
+
+### Prerequisites
+- **Python 3.8+**
+- **Linux/macOS** (WSL2 supported)
+- **Optional**: External tools for extended scanning (Amass, Nmap, Nuclei)
+
+### Installation
 
 ```bash
-# 📥 Clone the repository
+# Clone the repository
 git clone https://github.com/ziroai/synchunt.git
 cd synchunt
 
-# 📦 Install Python dependencies
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
 pip3 install -r requirements.txt
 
-# ✔️ Verify tool dependencies
+# Verify installation
 python3 main.py --check-deps
 ```
 
+### First Scan (30 seconds)
+
+```bash
+# Quick recon on a single target
+python3 main.py -d example.com --profile quick
+
+# View results
+open output/example.com/*/reports/findings.html
+```
+
 ---
 
-## 💻 Usage
+## 📖 Documentation
 
-### Full Reconnaissance Scan
+### 🚀 Usage Examples
+
+#### **Full Recon Pipeline**
 ```bash
 python3 main.py -d target.com --full
 ```
+Runs all 15 phases: subdomain enum → validation → enrichment → portscan → fingerprint → github → content → api → js → cloud → vulnscan → sensitive → screenshot → prioritize → report
 
-### Specific Scanning Phases
+#### **Balanced Profile (Recommended)**
 ```bash
-python3 main.py -d target.com --phase subdomain,validation,vulnscan
+python3 main.py -d target.com --profile balanced
+```
+Optimized for most targets: fast but comprehensive (10 phases, ~5-15 min)
+
+#### **Deep Recon**
+```bash
+python3 main.py -d target.com --profile deep
+```
+Aggressive scanning: all phases + extended timeout (full 15 phases)
+
+#### **Quick Scan**
+```bash
+python3 main.py -d target.com --profile quick
+```
+Fast reconnaissance: subdomain → validation → enrichment → content → report (~2-3 min)
+
+#### **Specific Phases Only**
+```bash
+python3 main.py -d target.com --phase subdomain,validation,github_recon,api_discovery
+```
+Run only selected phases
+
+#### **Multiple Targets**
+```bash
+python3 main.py -l targets.txt --full --verbose
+```
+Scan a file of targets, one per line
+
+#### **Custom Output Directory**
+```bash
+python3 main.py -d target.com --output-dir /custom/path --profile full
 ```
 
-### Multiple Targets
+#### **Verbose Output & Resume**
 ```bash
-python3 main.py -l targets.txt --full
-```
-
-### Verbose Output
-```bash
-python3 main.py -d target.com --full -v
-```
-
-### Custom Config
-```bash
-python3 main.py -d target.com --full --config custom_config.yaml
+python3 main.py -d target.com --verbose --resume
 ```
 
 ---
 
-## ⚙️ Requirements
+## 🔧 Configuration
 
-| Requirement | Version | Purpose |
-|------------|---------|---------|
-| **Python** | 3.8+ | Core framework |
-| **Go** | 1.19+ | Go-based reconnaissance tools |
-| **OS** | Kali Linux / Ubuntu | Recommended environment |
-| **Memory** | 4GB+ | Better scan performance |
-| **Disk Space** | 10GB+ | Tool installation + reports |
+### Profile Modes
 
-### Recommended Environment
-- 🐧 Kali Linux 2024+
-- 🐧 Ubuntu 22.04 LTS
-- 🍎 macOS 12+ (limited support)
+| Profile | Phases | Time | Use Case |
+|---------|--------|------|----------|
+| **quick** | 5 | ~2-3 min | Quick assessment |
+| **balanced** | 10 | ~5-15 min | Most targets (recommended) |
+| **full** | 14 | ~15-30 min | Comprehensive hunt |
+| **deep** | 15 | ~30-60+ min | Maximum coverage |
+
+### Key Configuration File: `config.yaml`
+
+```yaml
+general:
+  profile: balanced           # quick | balanced | full | deep
+  threads: 50                 # Parallel workers
+  timeout: 30                 # Per-tool timeout in seconds
+  rate_limit: 150             # Requests/second
+  verbose: true               # Verbose output
+  resume: true                # Auto-resume on interrupt
+
+profiles:
+  balanced:
+    phases:
+      - subdomain             # Step 1: Find all subdomains
+      - validation            # Step 2: Verify live hosts
+      - enrichment            # Step 3: Collect host intelligence
+      - portscan              # Step 4: Scan open ports
+      - fingerprint           # Step 5: Detect tech stacks
+      - github_recon          # Step 6: GitHub public intel
+      - content               # Step 7: Content/endpoint discovery
+      - api_discovery         # Step 8: API mapping
+      - jsanalysis            # Step 9: JS secret extraction
+      - cloud_enum            # Step 10: Cloud exposure checks
+      - vulnscan              # Step 11: Vulnerability assessment
+      - sensitive             # Step 12: Sensitive data hunt
+      - screenshot            # Step 13: Visual screenshots
+      - prioritize            # Step 14: Finding prioritization
+      - report                # Step 15: Generate reports
+```
+
+### Tool Configuration
+
+Edit `config.yaml` to enable/disable specific tools:
+
+```yaml
+subdomain_enum:
+  subfinder:
+    enabled: true
+    threads: 30
+    sources: "all"
+  amass:
+    enabled: true
+    passive: true
+
+content_discovery:
+  katana:
+    enabled: true
+    depth: 3
+    threads: 20
+    js_crawl: true
+  dirsearch:
+    enabled: true
+    threads: 30
+    extensions: "php,asp,aspx,jsp,html,js,json"
+
+api_introspection:
+  enabled: true
+  max_hosts: 100
+```
 
 ---
 
-## 📋 Phases Overview
+## 📊 Architecture
 
-| Phase | Description | Tools |
-|-------|-------------|-------|
-| 🔍 Reconnaissance | Gather initial intelligence | Subfinder, Amass, crt.sh |
-| ✅ Validation | Confirm live assets | httpx, dnsx, massdns |
-| 🔓 Scanning | Port and service discovery | Naabu, Nmap, Masscan |
-| 🧩 Fingerprinting | Identify tech stack | WhatWeb, wafw00f, webanalyze |
-| 🌐 Crawling | Enumerate endpoints and paths | Katana, GoSpider, Hakrawler |
-| 🔬 Analysis | Deep code inspection | LinkFinder, SecretFinder |
-| 🚨 Vulnerability | Security assessment | Nuclei, Dalfox, SQLMap |
-| 📸 Verification | Visual confirmation | Gowitness, Aquatone |
+```
+synchunt/
+├── main.py                 # Entry point & orchestrator
+├── config.yaml             # Configuration & profiles
+├── requirements.txt        # Python dependencies
+│
+├── core/
+│   ├── config_manager.py   # Config handling
+│   ├── database_manager.py # SQLite result storage
+│   ├── logger.py           # Logging & output
+│   ├── runner.py           # Tool execution
+│   └── utils.py            # Helper utilities
+│
+├── modules/
+│   ├── subdomain_enum.py           # Subdomain discovery
+│   ├── subdomain_validation.py     # Live host verification
+│   ├── asset_enrichment.py         # Asset intelligence
+│   ├── port_scanning.py            # Port enumeration
+│   ├── fingerprinting.py           # Tech detection
+│   ├── github_recon.py             # GitHub intel
+│   ├── api_introspection.py        # API discovery
+│   ├── content_discovery.py        # URL/endpoint crawling
+│   ├── js_analysis.py              # JS secret extraction
+│   ├── cloud_enum.py               # Cloud exposure checks
+│   ├── vuln_scanning.py            # Vulnerability testing
+│   ├── sensitive_info.py           # Credential hunting
+│   ├── finding_prioritizer.py      # Finding ranking
+│   └── scope_manager.py            # Scope filtering
+│
+└── reports/
+    ├── html_report.py              # HTML report generation
+    ├── markdown_report.py          # Markdown reports
+    └── notifier.py                 # Slack/Discord notifications
+```
 
 ---
 
-## 🔒 Legal & Ethical Disclaimer
+## 📈 Output Structure
 
-⚠️ **IMPORTANT**: This tool is intended for **authorized security testing only**.
+```
+output/
+└── target.com/
+    └── 20261007_113000/
+        ├── subdomains/              # Discovered subdomains
+        ├── dns/                     # Live hosts & DNS data
+        ├── ports/                   # Open ports & services
+        ├── fingerprinting/          # Tech stack info
+        ├── content_discovery/       # URLs & endpoints
+        │   ├── urls/
+        │   ├── params/
+        │   └── directories/
+        ├── js_analysis/             # JS secrets & endpoints
+        ├── api_intelligence/        # APIs discovered
+        ├── github_recon/            # GitHub findings
+        ├── cloud_enum/              # Cloud resources
+        ├── vulnerabilities/         # CVEs & misconfigs
+        ├── sensitive_info/          # Creds & exposed data
+        ├── intel/                   # Asset enrichment
+        ├── findings_prioritized/    # Ranked findings
+        ├── reports/                 # HTML/JSON/CSV reports
+        ├── screenshots/             # Visual captures
+        └── synchunt_results.db      # SQLite correlation DB
+```
 
-- ✅ Test systems you own or have explicit written permission to assess
-- ❌ Do not use unauthorized access or intrusive testing
-- 📜 Comply with local laws, regulations, and program scope rules
-- 🤝 Respect bug bounty policies and responsible disclosure practices
+---
 
-**By using this project, you agree to use it legally and responsibly.**
+## 🎮 Advanced Usage
+
+### Environment Variables
+
+```bash
+# GitHub token for expanded repo search
+export GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
+
+# Shodan API key
+export SHODAN_API_KEY="xxxxxxxxxxxx"
+
+# Slack webhook
+export SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+```
+
+### Scope Filtering
+
+```yaml
+# in config.yaml
+general:
+  scope_file: "scope.txt"         # Domains to include
+  out_of_scope_file: "oos.txt"    # Domains to exclude
+```
+
+```bash
+# scope.txt
+example.com
+*.example.com
+api.example.com
+```
+
+### Resume Interrupted Scans
+
+```bash
+# Auto-resumes if config has resume: true
+python3 main.py -d target.com --full --resume
+```
+
+### Database Queries
+
+```bash
+# Access SQLite results
+sqlite3 output/target.com/*/synchunt_results.db
+
+# List all findings
+SELECT severity, type, COUNT(*) FROM findings GROUP BY severity, type;
+
+# Export critical issues
+SELECT * FROM findings WHERE severity='CRITICAL' ORDER BY score DESC;
+```
+
+---
+
+## 🔐 Security & Legal
+
+- ⚠️ **Authorization Required**: Only test targets you own or have explicit written permission to test
+- 📋 **Respect Scope**: Follow bug bounty program rules and scope definitions
+- 🛡️ **Rate Limiting**: Configured to avoid DoS; adjust if needed
+- 📝 **Documentation**: Keep scan logs for audit trails and proof
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions from the security community.
+Contributions are welcome! Please:
 
-1. 🍴 Fork the repository
-2. 🌿 Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. 💾 Commit your changes (`git commit -m 'Add amazing feature'`)
-4. 📤 Push the branch (`git push origin feature/amazing-feature`)
-5. 🔄 Open a Pull Request
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes
+4. Run tests and validation
+5. Submit a pull request with clear description
 
-### Guidelines
-- Follow Python style best practices
-- Add tests for new features
-- Update documentation when needed
-- Keep changes focused and readable
+---
+
+## 📋 Requirements
+
+### Python Packages
+- pyyaml, requests, colorama, jinja2
+- beautifulsoup4, aiohttp, tabulate
+- Integrations: slack-sdk, python-telegram-bot
+
+### External Tools (Optional but Recommended)
+```bash
+# Install common recon tools
+sudo apt-get install nmap masscan dnsutils
+
+# Go-based tools (install from GitHub)
+go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+go install github.com/projectdiscovery/katana/cmd/katana@latest
+```
+
+---
+
+## 🚀 Roadmap
+
+- [ ] GraphQL query fuzzing
+- [ ] Custom vulnerability detection templates
+- [ ] Multi-target parallel orchestration
+- [ ] Real-time dashboard
+- [ ] Mobile app scanning
+- [ ] WAF bypass detection
+- [ ] Automated exploitation verification
 
 ---
 
 ## 📚 Resources
 
-- 📖 Full docs
-- 🔧 Configuration guide
-- 🎓 Tutorials and examples
-- 🐛 Troubleshooting
+- 📖 [Full Documentation](docs/README.md)
+- 🎥 [Video Tutorials](https://youtube.com/@ziroai)
+- 💬 [Discord Community](https://discord.gg/synchunt)
+- 🐛 [Issue Tracker](https://github.com/ziroai/synchunt/issues)
 
 ---
 
-## 📞 Support & Issues
+## 📄 License
 
-- 🐛 [Report a bug](https://github.com/ziroai/synchunt/issues/new)
-- 💡 [Request a feature](https://github.com/ziroai/synchunt/issues/new)
-- 💬 [Discussions](https://github.com/ziroai/synchunt/discussions)
-
----
-
-## 📜 License
-
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- 🔧 Built with community-driven security tools
-- 👥 Inspired by the bug bounty and red team ecosystem
-- ⭐ Thanks to contributors and ethical researchers everywhere
+MIT License - See [LICENSE](LICENSE) file for details
 
 ---
 
 <div align="center">
 
-### 🌟 If you find SyncHunt useful, please consider starring the project.
+**Made with ❤️ by Security Researchers for Security Researchers**
 
-[![GitHub stars](https://img.shields.io/github/stars/ziroai/synchunt?style=social)](https://github.com/ziroai/synchunt)
-[![GitHub watchers](https://img.shields.io/github/watchers/ziroai/synchunt?style=social)](https://github.com/ziroai/synchunt)
-
-**Happy hunting! 🎯**
+[![Follow on GitHub](https://img.shields.io/github/followers/ziroai?style=social)](https://github.com/ziroai)
+[![Twitter](https://img.shields.io/badge/Twitter-@ziroai-1DA1F2?style=flat&logo=twitter)](https://twitter.com/ziroai)
 
 </div>
